@@ -12,6 +12,7 @@ from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
+from .backends.base import BackendKind
 from .backends.base import MinerBackend
 from .backends.factory import async_create_backend
 from .const import CONF_IP
@@ -94,8 +95,16 @@ class MinerCoordinator(DataUpdateCoordinator):
         self.miner = None
 
     def _record_failure(self) -> None:
-        """Track failures and force a clean rediscovery after repeated errors."""
+        """Track failures and rediscover generic backends after repeated errors."""
         self._failure_count += 1
+
+        # A validated legacy Braiins S9 deliberately loses BOSMiner telemetry
+        # when its service is stopped. Keep that backend and its SSH transport
+        # alive so the Home Assistant switch can start BOSMiner again. Generic
+        # backends still use the normal rediscovery policy after repeated errors.
+        if self.backend is not None and self.backend.kind is BackendKind.BRAIINS_LEGACY:
+            return
+
         if self._failure_count >= RECONNECT_AFTER_FAILURES:
             self._reset_runtime_backend()
 
@@ -220,6 +229,6 @@ class MinerCoordinator(DataUpdateCoordinator):
             "power_limit_range": {
                 "min": power_range.minimum if power_range else self.configured_min_power,
                 "max": power_range.maximum if power_range else self.configured_max_power,
-                "step": power_range.step if power_range else 100,
+                "step": power_range.step if power_range else 1,
             },
         }
