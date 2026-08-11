@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
-from homeassistant.components.sensor import EntityCategory
+from homeassistant.components.button import ButtonDeviceClass
+from homeassistant.components.button import ButtonEntity
+from homeassistant.components.button import ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import MinerCoordinator
@@ -17,11 +19,13 @@ BUTTON_DESCRIPTIONS = {
     "reboot": ButtonEntityDescription(
         key="reboot",
         translation_key="reboot",
+        device_class=ButtonDeviceClass.RESTART,
         entity_category=EntityCategory.CONFIG,
     ),
     "restart_backend": ButtonEntityDescription(
         key="restart_backend",
         translation_key="restart_backend",
+        device_class=ButtonDeviceClass.RESTART,
         entity_category=EntityCategory.CONFIG,
     ),
 }
@@ -30,7 +34,7 @@ BUTTON_DESCRIPTIONS = {
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add maintenance buttons supported by the selected backend."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
