@@ -11,7 +11,8 @@ from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from .backends.pyasic_backend import PyasicBackend
+from .backends.base import MinerBackend
+from .backends.factory import async_create_backend
 from .const import CONF_IP
 from .const import CONF_MAX_POWER
 from .const import CONF_MIN_POWER
@@ -61,7 +62,7 @@ class MinerCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize MinerCoordinator."""
         self.miner = None
-        self.backend: PyasicBackend | None = None
+        self.backend: MinerBackend | None = None
         self._failure_count = 0
         super().__init__(
             hass=hass,
@@ -83,7 +84,7 @@ class MinerCoordinator(DataUpdateCoordinator):
         return self.backend is not None and self.last_update_success
 
     async def get_miner(self):
-        """Return the persistent pyasic miner used by the compatibility backend."""
+        """Return the persistent pyasic miner used for discovery/compatibility."""
         if self.miner is not None:
             return self.miner
 
@@ -106,13 +107,13 @@ class MinerCoordinator(DataUpdateCoordinator):
             miner.ssh.pwd = self.config_entry.data.get(CONF_SSH_PASSWORD, "")
 
         self.miner = miner
-        self.backend = PyasicBackend(
+        self.backend = await async_create_backend(
             miner,
             minimum_power=self.config_entry.data.get(CONF_MIN_POWER, 15),
             maximum_power=self.config_entry.data.get(CONF_MAX_POWER, 10000),
         )
-        _LOGGER.debug(
-            "%s: created persistent %s backend for %s",
+        _LOGGER.info(
+            "%s: selected %s backend for %s",
             self.config_entry.title,
             self.backend.kind.value,
             miner_ip,
