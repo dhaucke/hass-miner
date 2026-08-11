@@ -89,6 +89,7 @@ class MinerSnapshot:
     active_preset_name: str | None = None
     hashboards: tuple[HashboardData, ...] = field(default_factory=tuple)
     fans: tuple[FanData, ...] = field(default_factory=tuple)
+    raw_config: object | None = None
 
 
 class BackendError(Exception):
