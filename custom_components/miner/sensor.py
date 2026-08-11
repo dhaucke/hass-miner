@@ -23,7 +23,8 @@ from .entity import MinerEntity
 
 ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
     "temperature": SensorEntityDescription(
-        key="Temperature",
+        key="temperature",
+        translation_key="temperature",
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
@@ -31,7 +32,8 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "board_temperature": SensorEntityDescription(
-        key="Board Temperature",
+        key="board_temperature",
+        translation_key="board_temperature",
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
@@ -39,7 +41,8 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "chip_temperature": SensorEntityDescription(
-        key="Chip Temperature",
+        key="chip_temperature",
+        translation_key="chip_temperature",
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
@@ -47,50 +50,57 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "hashrate": SensorEntityDescription(
-        key="Hashrate",
+        key="hashrate",
+        translation_key="hashrate",
         native_unit_of_measurement=TERA_HASH_PER_SECOND,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "ideal_hashrate": SensorEntityDescription(
-        key="Ideal Hashrate",
+        key="ideal_hashrate",
+        translation_key="ideal_hashrate",
         native_unit_of_measurement=TERA_HASH_PER_SECOND,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "active_preset_name": SensorEntityDescription(
-        key="Active Preset Name",
-        device_class=SensorDeviceClass.ENUM,
+        key="active_preset_name",
+        translation_key="active_preset_name",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "board_hashrate": SensorEntityDescription(
-        key="Board Hashrate",
+        key="board_hashrate",
+        translation_key="board_hashrate",
         native_unit_of_measurement=TERA_HASH_PER_SECOND,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "power_limit": SensorEntityDescription(
-        key="Power Limit",
+        key="power_limit",
+        translation_key="power_limit",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "miner_consumption": SensorEntityDescription(
-        key="Miner Consumption",
+        key="miner_consumption",
+        translation_key="miner_consumption",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "efficiency": SensorEntityDescription(
-        key="Efficiency",
+        key="efficiency",
+        translation_key="efficiency",
         native_unit_of_measurement=JOULES_PER_TERA_HASH,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     "fan_speed": SensorEntityDescription(
-        key="Fan Speed",
+        key="fan_speed",
+        translation_key="fan_speed",
         native_unit_of_measurement=REVOLUTIONS_PER_MINUTE,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -109,19 +119,18 @@ async def async_setup_entry(
 
     sensors: list[SensorEntity] = []
     for sensor in coordinator.data["miner_sensors"]:
+        description = ENTITY_DESCRIPTION_KEY_MAP.get(sensor)
+        if description is None:
+            continue
         sensors.append(
             MinerSensor(
                 coordinator=coordinator,
                 sensor=sensor,
-                entity_description=ENTITY_DESCRIPTION_KEY_MAP.get(
-                    sensor, SensorEntityDescription(key="base_sensor")
-                ),
+                entity_description=description,
             )
         )
 
-    # Create topology entities from data actually reported by the backend.
-    # This avoids fabricating the legacy fallback of 3 hashboards / 4 fans for
-    # miners whose topology is unknown or different.
+    # Create topology entities only from data actually reported by the backend.
     for board_num in coordinator.data["board_sensors"]:
         for sensor in ("board_temperature", "chip_temperature", "board_hashrate"):
             sensors.append(
@@ -165,11 +174,6 @@ class MinerSensor(MinerEntity, SensorEntity):
         self.entity_description = entity_description
 
     @property
-    def name(self) -> str | None:
-        """Return name of the entity."""
-        return f"{self.coordinator.config_entry.title} {self.entity_description.key}"
-
-    @property
     def native_value(self) -> StateType:
         """Return the state of the sensor."""
         return self.coordinator.data["miner_sensors"].get(self._sensor)
@@ -190,20 +194,11 @@ class MinerBoardSensor(MinerEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator=coordinator)
         identity = self.coordinator.data.get("mac") or self.coordinator.data.get("ip")
-        self._attr_unique_id = (
-            f"{identity}-{board_num}-{sensor}" if identity else None
-        )
+        self._attr_unique_id = f"{identity}-{board_num}-{sensor}" if identity else None
+        self._attr_translation_placeholders = {"board": str(board_num)}
         self._board_num = board_num
         self._sensor = sensor
         self.entity_description = entity_description
-
-    @property
-    def name(self) -> str | None:
-        """Return name of the entity."""
-        return (
-            f"{self.coordinator.config_entry.title} Board #{self._board_num} "
-            f"{self.entity_description.key}"
-        )
 
     @property
     def native_value(self) -> StateType:
@@ -229,17 +224,10 @@ class MinerFanSensor(MinerEntity, SensorEntity):
         super().__init__(coordinator=coordinator)
         identity = self.coordinator.data.get("mac") or self.coordinator.data.get("ip")
         self._attr_unique_id = f"{identity}-{fan_num}-{sensor}" if identity else None
+        self._attr_translation_placeholders = {"fan": str(fan_num)}
         self._fan_num = fan_num
         self._sensor = sensor
         self.entity_description = entity_description
-
-    @property
-    def name(self) -> str | None:
-        """Return name of the entity."""
-        return (
-            f"{self.coordinator.config_entry.title} Fan #{self._fan_num} "
-            f"{self.entity_description.key}"
-        )
 
     @property
     def native_value(self) -> StateType:
