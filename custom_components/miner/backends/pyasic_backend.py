@@ -15,6 +15,7 @@ from .base import HashboardData
 from .base import MinerCapabilities
 from .base import MinerSnapshot
 from .base import PowerLimitRange
+from .base import UnsafeConfigurationError
 
 if TYPE_CHECKING:
     import pyasic
@@ -87,8 +88,6 @@ class PyasicBackend:
         try:
             data = await self.miner.get_data(include=options)
         except Exception as err:
-            # Preserve the existing VNish compatibility behavior while keeping
-            # it isolated inside the pyasic backend.
             if "config" not in str(err).lower():
                 raise
             options.remove(pyasic.DataOptions.CONFIG)
@@ -142,10 +141,24 @@ class PyasicBackend:
         return snapshot
 
     async def async_set_power_limit(self, value: int) -> None:
-        """Set power limit through pyasic for generic compatible miners."""
+        """Set a power limit, refusing known unsafe legacy Braiins writes."""
         if not self.capabilities.power_limit:
             raise BackendUnsupportedError("Power-limit control is not supported")
         self._power_range.validate(value)
+
+        # pyasic's legacy BOSMiner implementation rebuilds the complete TOML
+        # file and derives [format].model from transient runtime attributes.
+        # Refuse a known-dangerous call until the dedicated Braiins backend owns
+        # this operation.
+        if type(self.miner).__name__ == "BOSMiner":
+            make = getattr(self.miner, "make", None)
+            raw_model = getattr(self.miner, "raw_model", None)
+            if not make or not raw_model:
+                raise UnsafeConfigurationError(
+                    "Legacy Braiins model detection is incomplete; refusing to "
+                    "overwrite bosminer.toml"
+                )
+
         result = await self.miner.set_power_limit(value)
         if not result:
             raise RuntimeError("pyasic failed to set the requested power limit")
