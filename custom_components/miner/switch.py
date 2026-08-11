@@ -31,17 +31,14 @@ async def async_setup_entry(
 class MinerActiveSwitch(MinerEntity, SwitchEntity):
     """Pause and resume mining through the selected backend."""
 
+    _attr_translation_key = "active"
+
     def __init__(self, coordinator: MinerCoordinator) -> None:
         """Initialize the active-state switch."""
         super().__init__(coordinator=coordinator)
         identity = self.coordinator.data.get("mac") or self.coordinator.data.get("ip")
         self._attr_unique_id = f"{identity}-active" if identity else None
         self._attr_is_on = self.coordinator.data.get("is_mining")
-
-    @property
-    def name(self) -> str | None:
-        """Return entity name."""
-        return f"{self.coordinator.config_entry.title} active"
 
     async def async_turn_on(self) -> None:
         """Resume mining and then refresh actual state."""
