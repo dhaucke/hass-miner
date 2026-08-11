@@ -39,12 +39,20 @@ class FakeCoordinator:
         self.refreshes += 1
 
 
+def _generic_switch_entity(coordinator: FakeCoordinator) -> SimpleNamespace:
+    """Return a minimal switch stub using the generic non-BOSMiner path."""
+    return SimpleNamespace(
+        coordinator=coordinator,
+        _uses_bosminer_service_control=False,
+    )
+
+
 @pytest.mark.asyncio
 async def test_active_switch_refreshes_after_resume() -> None:
     """Resume must be followed by a confirmed coordinator refresh."""
     backend = FakeBackend()
     coordinator = FakeCoordinator(backend)
-    entity = SimpleNamespace(coordinator=coordinator)
+    entity = _generic_switch_entity(coordinator)
 
     await MinerActiveSwitch.async_turn_on(entity)
 
@@ -57,7 +65,7 @@ async def test_active_switch_refreshes_after_pause() -> None:
     """Pause must be followed by a confirmed coordinator refresh."""
     backend = FakeBackend()
     coordinator = FakeCoordinator(backend)
-    entity = SimpleNamespace(coordinator=coordinator)
+    entity = _generic_switch_entity(coordinator)
 
     await MinerActiveSwitch.async_turn_off(entity)
 
@@ -68,12 +76,13 @@ async def test_active_switch_refreshes_after_pause() -> None:
 @pytest.mark.asyncio
 async def test_switch_does_not_refresh_when_command_fails() -> None:
     """A rejected command must not imply a successful state transition."""
+
     class FailingBackend(FakeBackend):
         async def async_resume(self) -> None:
             raise RuntimeError("rejected")
 
     coordinator = FakeCoordinator(FailingBackend())
-    entity = SimpleNamespace(coordinator=coordinator)
+    entity = _generic_switch_entity(coordinator)
 
     with pytest.raises(RuntimeError, match="rejected"):
         await MinerActiveSwitch.async_turn_on(entity)
