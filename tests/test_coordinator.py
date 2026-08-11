@@ -6,35 +6,33 @@ from custom_components.miner.coordinator import MinerCoordinator
 from custom_components.miner.coordinator import RECONNECT_AFTER_FAILURES
 
 
-def _coordinator_stub() -> MinerCoordinator:
-    """Create a minimal coordinator instance for pure lifecycle helpers."""
-    coordinator = object.__new__(MinerCoordinator)
-    coordinator._failure_count = 0
-    coordinator.backend = object()
-    coordinator.miner = object()
-    coordinator.config_entry = SimpleNamespace(title="Test miner")
-    return coordinator
+def _coordinator_stub():
+    """Return a minimal object accepted by the pure failure helper."""
+    reset_calls: list[bool] = []
+    coordinator = SimpleNamespace(
+        _failure_count=0,
+        _reset_runtime_backend=lambda: reset_calls.append(True),
+    )
+    return coordinator, reset_calls
 
 
 def test_backend_is_kept_for_transient_failures() -> None:
-    """One or two failed polls should not immediately discard runtime state."""
-    coordinator = _coordinator_stub()
+    """One or two failed polls should not trigger rediscovery."""
+    coordinator, reset_calls = _coordinator_stub()
 
     for _ in range(RECONNECT_AFTER_FAILURES - 1):
-        coordinator._record_failure()
+        MinerCoordinator._record_failure(coordinator)
 
-    assert coordinator.backend is not None
-    assert coordinator.miner is not None
+    assert reset_calls == []
     assert coordinator._failure_count == RECONNECT_AFTER_FAILURES - 1
 
 
 def test_backend_is_rediscovered_after_repeated_failures() -> None:
-    """Repeated failures must clear stale pyasic/backend runtime objects."""
-    coordinator = _coordinator_stub()
+    """Repeated failures must request a clean runtime rediscovery."""
+    coordinator, reset_calls = _coordinator_stub()
 
     for _ in range(RECONNECT_AFTER_FAILURES):
-        coordinator._record_failure()
+        MinerCoordinator._record_failure(coordinator)
 
-    assert coordinator.backend is None
-    assert coordinator.miner is None
+    assert reset_calls == [True]
     assert coordinator._failure_count == RECONNECT_AFTER_FAILURES
