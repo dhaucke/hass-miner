@@ -1,8 +1,10 @@
 <div align="center">
 
-<img src="custom_components/miner/brand/icon.png" alt="Miner icon" width="140">
-
-# Miner
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="custom_components/miner/brand/dark_logo.png">
+  <source media="(prefers-color-scheme: light)" srcset="custom_components/miner/brand/logo.png">
+  <img src="custom_components/miner/brand/logo.png" alt="Miner" width="520">
+</picture>
 
 ### Local ASIC miner monitoring and control for Home Assistant
 
@@ -131,5 +133,3 @@ Miner is released under the [MIT License](LICENSE).
 This repository is a fork and substantial rework of the original `Schnitzel/hass-miner` project. The original MIT copyright notice is preserved in the project history.
 
 The generic compatibility backend uses [pyasic](https://github.com/UpstreamData/pyasic).
-
-The integration brand icon uses the Google Material Icons `memory` glyph, distributed under the Apache License 2.0 and recolored for Miner branding.
