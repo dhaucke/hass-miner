@@ -9,27 +9,29 @@ permissions: {}
 
 jobs:
   release:
-    name: "Release"
+    name: "Build release asset"
     runs-on: "ubuntu-latest"
     permissions:
       contents: write
     steps:
       - name: "Checkout the repository"
-        uses: "actions/checkout@v4.2.0"
+        uses: "actions/checkout@v5"
 
-      - name: "Adjust version number"
+      - name: "Set manifest version from tag"
         shell: "bash"
         run: |
-          yq -i -o json '.version="${{ github.event.release.tag_name }}"' \
+          RELEASE_VERSION="${{ github.event.release.tag_name }}"
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
+          yq -i -o json ".version=\"${RELEASE_VERSION}\"" \
             "${{ github.workspace }}/custom_components/miner/manifest.json"
 
       - name: "ZIP the integration directory"
         shell: "bash"
         run: |
           cd "${{ github.workspace }}/custom_components/miner"
-          zip miner.zip -r ./
+          zip -r miner.zip ./ -x "miner.zip"
 
-      - name: "Upload the ZIP file to the release"
-        uses: softprops/action-gh-release@v2.0.8
+      - name: "Upload release asset"
+        uses: softprops/action-gh-release@v2
         with:
           files: ${{ github.workspace }}/custom_components/miner/miner.zip
