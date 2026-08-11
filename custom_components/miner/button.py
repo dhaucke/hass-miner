@@ -38,7 +38,6 @@ async def async_setup_entry(
 ) -> None:
     """Add maintenance buttons supported by the selected backend."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
-    await coordinator.async_config_entry_first_refresh()
 
     backend = coordinator.backend
     if backend is None:
