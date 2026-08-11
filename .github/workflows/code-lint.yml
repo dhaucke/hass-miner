@@ -4,13 +4,12 @@ on:
   push:
     branches:
       - "main"
-      - "develop"
+      - "release/**"
       - "feature/**"
       - "fix/**"
   pull_request:
     branches:
       - "main"
-      - "develop"
 
 jobs:
   test:
@@ -18,10 +17,10 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - name: "Checkout the repository"
-        uses: "actions/checkout@v4"
+        uses: "actions/checkout@v5"
 
       - name: "Set up Python"
-        uses: "actions/setup-python@v5"
+        uses: "actions/setup-python@v6"
         with:
           python-version: "3.14"
           cache: "pip"
