@@ -8,6 +8,7 @@ can corrupt ``[format].model``. This backend changes only the existing
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import tomllib
@@ -82,14 +83,18 @@ def update_power_target(raw_config: str, value: int) -> str:
         )
 
     index = matches[0]
-    newline = "\r\n" if lines[index].endswith("\r\n") else "\n" if lines[index].endswith("\n") else ""
+    newline = (
+        "\r\n"
+        if lines[index].endswith("\r\n")
+        else "\n"
+        if lines[index].endswith("\n")
+        else ""
+    )
     line = lines[index].rstrip("\r\n")
     match = _POWER_TARGET_RE.match(line)
     if match is None:  # Defensive: the line was matched above.
         raise UnsafeConfigurationError("Could not safely patch power_target")
-    lines[index] = (
-        f"{match.group('prefix')}{value}{match.group('suffix')}{newline}"
-    )
+    lines[index] = f"{match.group('prefix')}{value}{match.group('suffix')}{newline}"
     updated = "".join(lines)
 
     candidate = _validated_s9_config(updated)
@@ -165,12 +170,38 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         if not isinstance(result, str):
             raise RuntimeError("BOSMiner restart did not return a successful response")
 
+    async def _wait_for_bosminer(self, *, attempts: int = 12, delay: float = 2.0) -> None:
+        """Wait until BOSMiner telemetry responds again after a restart."""
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            if attempt:
+                await asyncio.sleep(delay)
+            try:
+                await super().async_refresh()
+            except Exception as err:  # The daemon may still be starting.
+                last_error = err
+                continue
+            return
+
+        raise RuntimeError("BOSMiner did not recover after restart") from last_error
+
     async def _validate_backup(self, original: str) -> None:
         """Verify the dedicated backup is byte-for-byte valid before any write."""
         backup = await self.miner.ssh.send_command(f"cat {BACKUP_PATH}")
         if backup != original:
             raise UnsafeConfigurationError("Dedicated BOSMiner backup verification failed")
         _validated_s9_config(backup)
+
+    async def _restore_backup(self, original: str) -> None:
+        """Restore, verify and restart the last validated configuration."""
+        ssh = self.miner.ssh
+        await ssh.send_command(f"cp {BACKUP_PATH} /etc/bosminer.toml")
+        restored = await ssh.get_config_file()
+        if restored != original:
+            raise UnsafeConfigurationError("BOSMiner rollback verification failed")
+        _validated_s9_config(restored)
+        await self._restart_bosminer()
+        await self._wait_for_bosminer()
 
     async def async_set_power_limit(self, value: int) -> None:
         """Safely change only power_target with backup, atomic replace and rollback."""
@@ -205,14 +236,10 @@ class BraiinsLegacyS9Backend(PyasicBackend):
             if parsed["autotuning"].get("power_target") != value:
                 raise UnsafeConfigurationError("Written power_target does not match request")
             await self._restart_bosminer()
+            await self._wait_for_bosminer()
         except Exception as write_err:
             try:
-                await ssh.send_command(f"cp {BACKUP_PATH} /etc/bosminer.toml")
-                restored = await ssh.get_config_file()
-                if restored != raw_config:
-                    raise UnsafeConfigurationError("BOSMiner rollback verification failed")
-                _validated_s9_config(restored)
-                await self._restart_bosminer()
+                await self._restore_backup(raw_config)
             except Exception as rollback_err:
                 raise UnsafeConfigurationError(
                     "Power target update failed and automatic rollback could not be verified"
