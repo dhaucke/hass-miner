@@ -16,10 +16,12 @@ class FakeSSH:
     """Return a deterministic BOSMiner process state."""
 
     def __init__(self, *, running: bool) -> None:
+        """Initialize the fake SSH process state."""
         self.running = running
         self.commands: list[str] = []
 
     async def send_command(self, command: str) -> str:
+        """Return the configured BOSMiner process state."""
         self.commands.append(command)
         if "pidof bosminer" not in command:
             raise AssertionError(f"Unexpected command: {command}")
