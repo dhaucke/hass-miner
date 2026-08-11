@@ -1,33 +1,54 @@
 {
-  "title": "HASS-miner",
+  "title": "Miner",
   "config": {
     "step": {
       "user": {
+        "title": "Add miner",
+        "description": "Enter the local IP address or hostname of the miner. Miner scans are not run automatically.",
         "data": {
-          "ip": "[%key:common::config_flow::data::ip%]",
-          "min_power": "[%key:common::config_flow::data::min_power%]",
-          "max_power": "[%key:common::config_flow::data::max_power%]"
+          "ip": "IP address or hostname"
         }
       },
       "login": {
+        "title": "Miner credentials",
+        "description": "{make} {model} was detected at {host}. Enter only the credentials required by this miner. SSH may be required for safe power control on some firmware.",
         "data": {
-          "ssh_username": "[%key:common::config_flow::data::ssh_username%]",
-          "ssh_password": "[%key:common::config_flow::data::ssh_password%]",
-          "rpc_password": "[%key:common::config_flow::data::rpc_password%]",
-          "web_username": "[%key:common::config_flow::data::web_username%]",
-          "web_password": "[%key:common::config_flow::data::web_password%]"
+          "rpc_password": "RPC password",
+          "web_username": "Web username",
+          "web_password": "Web password",
+          "ssh_username": "SSH username",
+          "ssh_password": "SSH password"
         }
       },
-      "title": {
+      "finish": {
+        "title": "Miner detected",
+        "description": "{make} {model} at {host} is ready to add.",
         "data": {
-          "title": "[%key:common::config_flow::data::title%]"
+          "title": "Name"
         }
       }
     },
+    "error": {
+      "cannot_connect": "The miner could not be reached or did not answer as expected.",
+      "invalid_auth": "The supplied credentials were rejected."
+    },
     "abort": {
-      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]",
-      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]",
-      "already_configured": "[%key:common::config_flow::abort::already_configured%]"
+      "already_configured": "This miner is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Advanced power settings",
+        "description": "Override the generic power range only when the miner backend cannot determine a safe range itself. Model-specific backends may ignore these values.",
+        "data": {
+          "min_power": "Minimum power",
+          "max_power": "Maximum power"
+        }
+      }
+    },
+    "error": {
+      "invalid_power_range": "Minimum power must be lower than maximum power."
     }
   },
   "services": {
@@ -36,8 +57,12 @@
       "description": "Reboots a miner."
     },
     "restart_backend": {
-      "name": "Restart mining on miner",
+      "name": "Restart mining backend",
       "description": "Restarts the mining process on a miner."
+    },
+    "set_work_mode": {
+      "name": "Set work mode",
+      "description": "Sets a firmware-defined power mode when supported."
     }
   }
 }
