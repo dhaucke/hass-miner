@@ -1,99 +1,116 @@
 # hass-miner
 
-[![GitHub Release][releases-shield]][releases]
-[![GitHub Activity][commits-shield]][commits]
-[![License][license-shield]](LICENSE)
+Local monitoring and control of ASIC miners from Home Assistant.
 
-[![pre-commit][pre-commit-shield]][pre-commit]
-[![Black][black-shield]][black]
+The 2.x rework separates Home Assistant from firmware-specific miner APIs. The goal is simple onboarding for normal Home Assistant users while keeping advanced controls and diagnostics available when the miner supports them.
 
-[![hacs][hacsbadge]][hacs]
-[![Project Maintenance][maintenance1-shield]][user1_profile]
-[![Project Maintenance][maintenance2-shield]][user2_profile]
+> **Development status:** the 2.x backend rework is currently under active development on `feature/backend-rework`. Do not treat the development branch as a stable release yet.
 
-Control and monitor your Bitcoin Miners from Home Assistant.
+## Why this fork exists
 
-[![Add Integration to Home Assistant](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=miner)
+The original integration delegated almost all behavior directly to pyasic. That made broad miner support possible, but it also coupled Home Assistant entities, discovery, configuration writes and firmware quirks tightly to one library.
 
-Great for Heat Reusage, Solar Mining or any usecase where you don't need your miners running 24/7 or with a specific wattage.
+The 2.x architecture introduces explicit miner backends:
 
-Works great in coordination with [ESPHome](https://www.home-assistant.io/integrations/esphome/) for Sensors (like temperature) and [Grafana](https://github.com/hassio-addons/addon-grafana) for Dashboards.
+- `braiins_legacy` — dedicated safe path for positively identified legacy Braiins/BOSMiner hardware,
+- `pyasic` — compatibility backend for the wider existing miner ecosystem,
+- additional native backends can be added without changing Home Assistant entities.
 
-### Support for:
+This is especially useful for solar mining, heat reuse, dynamic power control and installations where miners should not simply run at maximum power 24/7.
 
-- Antminers
-- Whatsminers
-- Avalonminers
-- Innosilicons
-- Goldshells
-- Auradine
-- BitAxe
-- IceRiver
-- Hammer
-- Braiins Firmware
-- Vnish Firmware
-- ePIC Firmware
-- HiveOS Firmware
-- LuxOS Firmware
-- Mara Firmware
+## Quick start
 
-[Full list of supported miners](https://pyasic.readthedocs.io/en/latest/miners/supported_types/).
+1. Install the repository as a custom HACS integration.
+2. Add the **Miner** integration in Home Assistant.
+3. Enter the miner IP address or hostname.
+4. hass-miner detects the miner and asks only for credentials exposed by that device.
+5. Give the device a friendly name.
 
-**This component will set up the following platforms -**
+The normal setup flow no longer asks ordinary users to guess minimum and maximum power values. Generic overrides remain available under the integration's advanced options.
 
-| Platform | Description               |
-| -------- | ------------------------- |
-| `sensor` | Show info from miner API. |
-| `number` | Set Power Limit of Miner. |
-| `switch` | Switch Miner on and off   |
+## Entities
 
-**This component will add the following services -**
+Entities are created from backend capabilities and detected topology. hass-miner does not invent three hashboards or four fans when the miner did not report them.
 
-| Service           | Description                          |
-| ----------------- | ------------------------------------ |
-| `reboot`          | Reboot a miner by IP                 |
-| `restart_backend` | Restart the backend of a miner by IP |
+Typical entities include:
 
-## Installation
+- hashrate and ideal hashrate,
+- miner and hashboard temperatures,
+- power consumption,
+- power limit,
+- efficiency,
+- fan speed,
+- hashboard hashrate,
+- mining pause/resume switch.
 
-Use HACS, add the custom repo https://github.com/Schnitzel/hass-miner to it
+Not every miner exposes every entity.
 
-[![Installation and usage Video](http://img.youtube.com/vi/eL83eYLbgQM/0.jpg)](https://www.youtube.com/watch?v=6HwSQag7NU8)
+## Power control safety
 
-## Contributions are welcome!
+Write operations are backend-specific.
 
-If you want to contribute to this please read the [Contribution guidelines](CONTRIBUTING.md)
+For a legacy Braiins Antminer S9, the dedicated backend requires two independent identity checks before S9-specific power control is enabled:
 
-## Credits
+- `/tmp/sysinfo/board_name` must identify `am1-s9`, and
+- `/etc/bosminer_model.json` must identify `Antminer S9`.
 
-This project was generated from [@oncleben31](https://github.com/oncleben31)'s [Home Assistant Custom Component Cookiecutter](https://github.com/oncleben31/cookiecutter-homeassistant-custom-component) template.
+The S9 backend does not rebuild the whole `bosminer.toml` file. It validates the existing TOML, changes only an existing `power_target`, creates its own validated backup, writes through a temporary file, atomically replaces the config and rolls back on validation failure.
 
-Code template was mainly taken from [@Ludeeus](https://github.com/ludeeus)'s [integration_blueprint][integration_blueprint] template.
+Current development defaults for this validated S9 path are 400–1000 W in 100 W steps.
 
-Miner control and data is handled using [@UpstreamData](https://github.com/UpstreamData)'s [pyasic](https://github.com/UpstreamData/pyasic).
+## Supported miners
 
----
+See [SUPPORTED_MINERS.md](SUPPORTED_MINERS.md).
 
-[integration_blueprint]: https://github.com/custom-components/integration_blueprint
-[black]: https://github.com/psf/black
-[black-shield]: https://img.shields.io/badge/code%20style-black-000000.svg?style=for-the-badge
-[buymecoffee]: https://www.buymeacoffee.com/Schnitzel
-[buymecoffeebadge]: https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg?style=for-the-badge
-[commits-shield]: https://img.shields.io/github/commit-activity/y/Schnitzel/hass-miner.svg?style=for-the-badge
-[commits]: https://github.com/Schnitzel/hass-miner/commits/main
-[hacs]: https://hacs.xyz
-[hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
-[discord]: https://discord.gg/Qa5fW2R
-[discord-shield]: https://img.shields.io/discord/330944238910963714.svg?style=for-the-badge
-[exampleimg]: example.png
-[forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
-[forum]: https://community.home-assistant.io/
-[license-shield]: https://img.shields.io/github/license/Schnitzel/hass-miner.svg?style=for-the-badge
-[maintenance1-shield]: https://img.shields.io/badge/maintainer-%40Schnitzel-blue.svg?style=for-the-badge
-[maintenance2-shield]: https://img.shields.io/badge/maintainer-%40b--rowan-blue.svg?style=for-the-badge
-[pre-commit]: https://github.com/pre-commit/pre-commit
-[pre-commit-shield]: https://img.shields.io/badge/pre--commit-enabled-brightgreen?style=for-the-badge
-[releases-shield]: https://img.shields.io/github/release/Schnitzel/hass-miner.svg?style=for-the-badge
-[releases]: https://github.com/Schnitzel/hass-miner/releases
-[user1_profile]: https://github.com/Schnitzel
-[user2_profile]: https://github.com/b-rowan
+Support levels intentionally distinguish between:
+
+- real-device tested,
+- community tested,
+- generic pyasic compatibility,
+- experimental / awaiting hardware testers.
+
+An S19 or S21 is not claimed as fully supported merely because a library can detect it.
+
+## Diagnostics and unsupported hardware
+
+Home Assistant diagnostics are part of the new support strategy. They are intended to provide backend type, detected model/firmware, capability information and topology without requiring users to post passwords or pool credentials.
+
+For hardware we do not own, open an **Unsupported or untested miner** issue and attach the diagnostics export. This allows recorded fixtures and regression tests to be built before write support is considered production-ready.
+
+Never upload passwords, private keys, pool credentials or wallet addresses.
+
+## Advanced options
+
+The standard setup intentionally stays small. Generic minimum and maximum power overrides are available in the integration options for users who know that their firmware requires them.
+
+Model-specific backends may ignore generic ranges when they have a narrower validated safe range.
+
+## Services
+
+Depending on backend capabilities, hass-miner can expose services for:
+
+- rebooting the miner,
+- restarting the mining backend,
+- selecting firmware-defined work modes.
+
+Unsupported operations are rejected instead of being guessed.
+
+## Development
+
+The rework plan is documented in [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+
+CI covers Ruff, pytest, HACS validation and hassfest on development branches. New firmware backends should be capability-driven and include recorded fixtures wherever possible.
+
+## Installation during development
+
+In HACS, add this repository as a custom integration repository:
+
+`https://github.com/dhaucke/hass-miner`
+
+For normal users, wait for a tagged 2.x release rather than installing an active feature branch.
+
+## Credits and license
+
+This repository is a fork of the original `Schnitzel/hass-miner` project and remains licensed under the MIT License. The original copyright and license notice are preserved in [LICENSE](LICENSE).
+
+The compatibility backend continues to use [pyasic](https://github.com/UpstreamData/pyasic) for broad miner support while dedicated backends progressively remove unsafe or firmware-specific write behavior from the generic path.
