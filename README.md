@@ -1,19 +1,148 @@
-![Miner - Local ASIC miner monitoring and control for Home Assistant](https://raw.githubusercontent.com/dhaucke/hass-miner/main/assets/miner-banner.png)
+![Miner - Lokale ASIC-Miner-Integration für Home Assistant](https://raw.githubusercontent.com/dhaucke/hass-miner/main/assets/miner-banner.png)
 
 # Miner
 
-**Local ASIC miner monitoring and control for Home Assistant.**
+**Lokale Überwachung und Steuerung von ASIC-Minern für Home Assistant.**
 
 [![Release](https://img.shields.io/github/v/release/dhaucke/hass-miner?style=flat-square)](https://github.com/dhaucke/hass-miner/releases/latest)
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5?style=flat-square)](https://github.com/hacs/integration)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-18BCF2?style=flat-square)](https://www.home-assistant.io/)
 [![License](https://img.shields.io/github/license/dhaucke/hass-miner?style=flat-square)](LICENSE)
 
-**Hashrate · Temperatures · Power · Efficiency · Fans · Mining control · Power limits**
+**Hashrate · Temperaturen · Leistung · Effizienz · Lüfter · Mining-Steuerung · Leistungslimits**
 
-[Install with HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration) · [Supported miners](SUPPORTED_MINERS.md) · [Report an issue](https://github.com/dhaucke/hass-miner/issues)
+[Mit HACS installieren](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration) · [Unterstützte Miner](SUPPORTED_MINERS.md) · [Problem melden](https://github.com/dhaucke/hass-miner/issues)
+
+**Sprache:** [Deutsch](#deutsch) · [English](#english)
 
 ---
+
+# Deutsch
+
+## Was ist Miner?
+
+**Miner** ist eine lokal arbeitende Home-Assistant-Integration zur Überwachung und Steuerung von ASIC-Minern. Die Integration verwendet eine fähigkeitsbasierte Backend-Architektur, damit die Home-Assistant-Entitäten konsistent bleiben und firmware-spezifisches Verhalten sicher behandelt werden kann.
+
+> Kein Cloud-Dienst erforderlich. Die Kommunikation erfolgt direkt zwischen Home Assistant und dem Miner im lokalen Netzwerk.
+
+## Highlights
+
+| Funktion | Beschreibung |
+| --- | --- |
+| **Live-Telemetrie** | Hashrate, Ideal-Hashrate, Temperaturen, Board-Telemetrie, Lüfterdrehzahl, Verbrauch und Effizienz, sofern unterstützt |
+| **Leistungssteuerung** | Vom Backend validierte Leistungslimits über native Home-Assistant-Number-Entitäten |
+| **Mining-Steuerung** | Mining starten/stoppen, Miner neu starten und Mining-Backend neu starten, sofern unterstützt |
+| **Automatisierungsbereit** | Native Entitäten und Dienste für PV-Überschuss, Speicher, Lastmanagement und weitere Home-Assistant-Automatisierungen |
+| **Robustes Polling** | Offline oder nicht erreichbare Miner blockieren den Home-Assistant-Start nicht unnötig |
+| **Diagnose** | Home-Assistant-Diagnosedaten zur Fehlersuche und Unterstützung weiterer Hardware |
+
+---
+
+## Antminer S9 + Legacy Braiins OS+
+
+Das dedizierte Backend `braiins_legacy` wurde auf echter **Antminer-S9-Hardware** mit **Braiins OS+ 22.08.1** validiert.
+
+Für einen eindeutig erkannten S9 bietet es:
+
+- sichere Leistungsvorgaben von **400 W bis 1400 W in 1-W-Schritten**,
+- unabhängige Hardwarevalidierung über `/tmp/sysinfo/board_name` und `/etc/bosminer_model.json`,
+- atomare Änderung ausschließlich des vorhandenen `power_target` in `bosminer.toml`,
+- ein dediziertes validiertes Backup mit automatischem Rollback bei Schreib- oder Neustartfehlern,
+- Start/Stopp des BOSMiner-Dienstes über SSH für zuverlässige Mining-Steuerung aus Home Assistant,
+- direkte BOSer-Telemetrie für Board-/Chip-Temperaturen und Lüfter, sofern die Firmware diese liefert,
+- kurzes **feldweises Telemetrie-Caching**, um vorübergehende BOSer-Aussetzer abzufangen, ohne dauerhafte Fehler zu verstecken.
+
+> **Warum ein eigenes Backend?**  
+> Das S9-Backend baut die vollständige BOSMiner-Konfiguration bewusst nicht über pyasic neu auf. Es wird ausschließlich das validierte Leistungslimit geändert. Dadurch werden Beschädigungen älterer Konfigurationen und Modellmetadaten vermieden.
+
+### Legacy-Braiins-Lüftertelemetrie
+
+Legacy BOSer/BOSMiner kann zeitweise keine Lüfterdrehzahlen zurückgeben, obwohl das Mining normal weiterläuft. Miner stabilisiert kurze Aussetzer über das Telemetrie-Caching. Wenn die Lüfterwerte dauerhaft fehlen, kann **Mining-Backend neu starten** verwendet werden, um BOSMiner/BOSer neu zu starten und die Telemetrie wiederherzustellen.
+
+## Weitere Miner
+
+Andere von pyasic unterstützte Miner verwenden das generische Kompatibilitäts-Backend. Eine erfolgreiche Erkennung bedeutet **nicht**, dass jede firmware-spezifische Schreiboperation für dieses Projekt separat validiert wurde.
+
+Siehe **[SUPPORTED_MINERS.md](SUPPORTED_MINERS.md)** für den aktuellen Unterstützungsstatus und Hardwarehinweise.
+
+---
+
+## Installation
+
+### HACS
+
+1. **HACS** öffnen.
+2. Das Menü öffnen und **Benutzerdefinierte Repositories / Custom repositories** wählen.
+3. `https://github.com/dhaucke/hass-miner` als Typ **Integration** hinzufügen.
+4. **Miner** installieren und Home Assistant neu starten.
+5. **Einstellungen → Geräte & Dienste → Integration hinzufügen → Miner** öffnen.
+6. IP-Adresse oder Hostname des Miners sowie die für das Gerät benötigten Zugangsdaten eingeben.
+
+[![Dieses Repository in HACS öffnen.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration)
+
+### Manuelle Installation
+
+`custom_components/miner` in das `custom_components`-Verzeichnis von Home Assistant kopieren und Home Assistant neu starten.
+
+---
+
+## Home-Assistant-Entitäten
+
+Entitäten werden anhand der erkannten Backend-Fähigkeiten und der vom Miner gemeldeten Topologie erstellt. Miner erfindet keine Hashboards oder Lüfter, die vom Gerät nie gemeldet wurden.
+
+| Entität / Fähigkeit | Verfügbarkeit |
+| --- | --- |
+| **Hashrate / Ideal-Hashrate** | Wenn vom Miner gemeldet |
+| **Leistungsaufnahme / Effizienz** | Wenn unterstützt |
+| **Temperatur** | Geräte- und Hashboard-Temperaturen, sofern verfügbar |
+| **Chip-Temperatur** | Wenn vom Backend bereitgestellt |
+| **Lüfterdrehzahl** | Wenn vom Miner gemeldet |
+| **Leistungslimit** | Unterstützte schreibfähige Backends |
+| **Mining-Schalter** | Wenn unterstützt |
+| **Neustart** | Wenn unterstützt |
+| **Mining-Backend neu starten** | Backends, die diese Funktion bereitstellen |
+
+Nicht jeder Miner stellt jede Entität bereit.
+
+## Sicherheit bei der Leistungssteuerung
+
+Leistungsvorgaben sind backend-spezifisch. Modellspezifische Backends können einen validierten Wertebereich erzwingen, selbst wenn generische erweiterte Optionen anders konfiguriert sind.
+
+Beim Legacy-S9 wird ausschließlich ein vorhandener ganzzahliger `[autotuning].power_target` geändert. Miner verweigert die Änderung, wenn Geräteidentität, TOML-Struktur, Autotuning-Status oder Modellmetadaten nicht dem validierten S9-Pfad entsprechen.
+
+---
+
+## Fehlerbehebung
+
+Wenn ein Miner nicht unterstützt wird oder sich ein Integrationsproblem reproduzieren lässt, bitte ein GitHub-Issue öffnen und bei Bedarf den Home-Assistant-Diagnoseexport anhängen.
+
+> **Sicherheit:** Niemals Passwörter, SSH-Schlüssel, Pool-Zugangsdaten, Wallet-Adressen oder andere Geheimnisse veröffentlichen.
+
+## Entwicklung
+
+Die gleichen Prüfungen wie in CI können lokal ausgeführt werden:
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m ruff check .
+python3 -m pytest -q
+```
+
+HACS-Validierung und hassfest laufen über GitHub Actions.
+
+---
+
+## Credits & Lizenz
+
+Miner wird unter der [MIT-Lizenz](LICENSE) veröffentlicht.
+
+Dieses Repository ist ein Fork und eine umfassende Überarbeitung des ursprünglichen Projekts `Schnitzel/hass-miner`. Der ursprüngliche MIT-Copyright-Hinweis bleibt in der Projekthistorie erhalten.
+
+Das generische Kompatibilitäts-Backend verwendet [pyasic](https://github.com/UpstreamData/pyasic).
+
+---
+
+# English
 
 ## What is Miner?
 
@@ -46,7 +175,7 @@ For a positively identified S9 it provides:
 - a dedicated validated backup plus automatic rollback on write/restart failure,
 - BOSMiner service start/stop through SSH for reliable Home Assistant mining control,
 - direct BOSer board/chip temperature and fan telemetry when the firmware returns it,
-- short **per-field** telemetry caching to absorb transient BOSer omissions without hiding persistent failures.
+- short **per-field telemetry caching** to absorb transient BOSer omissions without hiding persistent failures.
 
 > **Why a dedicated backend?**  
 > The S9 backend deliberately does not rebuild the complete BOSMiner configuration through pyasic. Only the validated power-target field is changed, preventing legacy configuration corruption of the firmware model metadata.
@@ -74,7 +203,7 @@ See **[SUPPORTED_MINERS.md](SUPPORTED_MINERS.md)** for the current support level
 5. Go to **Settings → Devices & services → Add integration → Miner**.
 6. Enter the miner IP address or hostname and the credentials requested for that device.
 
-[![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration)
+[![Open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration)
 
 ### Manual installation
 
