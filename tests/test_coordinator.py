@@ -7,14 +7,16 @@ import pytest
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 import custom_components.miner.coordinator as coordinator_module
+from custom_components.miner.backends.base import BackendKind
 from custom_components.miner.coordinator import MinerCoordinator
 from custom_components.miner.coordinator import RECONNECT_AFTER_FAILURES
 
 
-def _coordinator_stub():
+def _coordinator_stub(*, backend=None):
     """Return a minimal object accepted by the pure failure helper."""
     reset_calls: list[bool] = []
     coordinator = SimpleNamespace(
+        backend=backend,
         _failure_count=0,
         _reset_runtime_backend=lambda: reset_calls.append(True),
     )
@@ -33,7 +35,7 @@ def test_backend_is_kept_for_transient_failures() -> None:
 
 
 def test_backend_is_rediscovered_after_repeated_failures() -> None:
-    """Repeated failures must request a clean runtime rediscovery."""
+    """Repeated generic failures must request a clean runtime rediscovery."""
     coordinator, reset_calls = _coordinator_stub()
 
     for _ in range(RECONNECT_AFTER_FAILURES):
@@ -41,6 +43,19 @@ def test_backend_is_rediscovered_after_repeated_failures() -> None:
 
     assert reset_calls == [True]
     assert coordinator._failure_count == RECONNECT_AFTER_FAILURES
+
+
+def test_legacy_braiins_backend_is_kept_when_bosminer_stops() -> None:
+    """BOSMiner telemetry loss must not discard the SSH recovery transport."""
+    backend = SimpleNamespace(kind=BackendKind.BRAIINS_LEGACY)
+    coordinator, reset_calls = _coordinator_stub(backend=backend)
+
+    for _ in range(RECONNECT_AFTER_FAILURES + 2):
+        MinerCoordinator._record_failure(coordinator)
+
+    assert reset_calls == []
+    assert coordinator.backend is backend
+    assert coordinator._failure_count == RECONNECT_AFTER_FAILURES + 2
 
 
 @pytest.mark.asyncio
