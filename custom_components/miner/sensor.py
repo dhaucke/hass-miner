@@ -115,7 +115,6 @@ async def async_setup_entry(
 ) -> None:
     """Add sensors for the config entry."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
-    await coordinator.async_config_entry_first_refresh()
 
     sensors: list[SensorEntity] = []
     for sensor in coordinator.data["miner_sensors"]:
