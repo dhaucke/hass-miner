@@ -4,11 +4,12 @@ on:
   push:
     branches:
       - main
-      - develop
+      - "release/**"
+      - "feature/**"
+      - "fix/**"
   pull_request:
     branches:
       - main
-      - develop
   schedule:
     - cron: "0 0 * * *"
 
@@ -18,7 +19,7 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - name: "Checkout the repository"
-        uses: "actions/checkout@v4.2.0"
+        uses: "actions/checkout@v5"
 
       - name: "Run HACS validation"
         uses: "hacs/action@main"
@@ -31,7 +32,7 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - name: "Checkout the repository"
-        uses: "actions/checkout@v4.2.0"
+        uses: "actions/checkout@v5"
 
       - name: "Run hassfest validation"
         uses: "home-assistant/actions/hassfest@master"
