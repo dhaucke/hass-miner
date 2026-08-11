@@ -107,6 +107,7 @@ Real S9 hardware is required before declaring this backend release-tested.
 - [x] Add shared device entity base class.
 - [x] Add capability-driven reboot/restart buttons for stateless maintenance actions.
 - [x] Stop inventing three boards/four fans when topology is unknown.
+- [x] Add regression coverage for duplicate-host normalization and safe setup placeholders.
 - [ ] Improve credential/error classification beyond string matching where backend APIs expose typed authentication errors.
 - [ ] Consider migrating runtime coordinator storage from `hass.data` to typed `ConfigEntry.runtime_data` after the current beta path is stable.
 
@@ -118,6 +119,7 @@ Real S9 hardware is required before declaring this backend release-tested.
 - [x] Include backend choice, capabilities, topology and safety status.
 - [x] Add unsupported/untested miner GitHub issue template.
 - [x] Add explicit support-level documentation.
+- [x] Add diagnostics regression tests for network-identity redaction and backend reuse.
 - [ ] Add sanitized protocol samples when a native backend can expose them without secrets.
 - [ ] Add recorded community fixtures for S19/S21-class devices as submissions arrive.
 
@@ -134,19 +136,20 @@ Implemented tests currently cover:
 - [x] schema-change rejection;
 - [x] rollback after failed BOSMiner restart;
 - [x] generic legacy BOSMiner configuration-write blocking;
-- [x] service device-ID normalization.
+- [x] service device-ID normalization;
+- [x] config-entry migration behavior;
+- [x] duplicate-host and config-flow helper behavior;
+- [x] coordinator transient-failure and rediscovery thresholds;
+- [x] diagnostics redaction and backend-reuse behavior;
+- [x] switch/button command refresh semantics.
 
 Still required:
 
-- [ ] config-flow success/auth/failure/duplicate tests with Home Assistant fixtures;
-- [ ] config-entry migration tests;
-- [ ] coordinator offline -> recovery tests;
+- [ ] full config-flow success/auth/failure tests with Home Assistant flow fixtures;
 - [ ] entity unique-ID migration/regression tests;
-- [ ] diagnostics redaction tests;
-- [ ] button/switch post-command state tests;
 - [ ] recorded protocol fixture tests for community hardware.
 
-CI workflows are configured for Ruff, pytest, HACS validation and hassfest on development pull requests. GitHub Actions has not produced a run on this fork yet, so CI is **not considered verified** until Actions is enabled/running and the checks pass.
+CI is now verified on the fork. Ruff, pytest, HACS validation and hassfest all pass on the backend rework pull request. The test suite is expected to remain green before any beta hardware run or merge into `develop`.
 
 ## Hardware test matrix
 
