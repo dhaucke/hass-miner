@@ -1,116 +1,111 @@
 # hass-miner
 
-Local monitoring and control of ASIC miners from Home Assistant.
+<p align="center">
+  <img src="custom_components/miner/brand/icon.png" alt="hass-miner icon" width="128">
+</p>
 
-The 2.x rework separates Home Assistant from firmware-specific miner APIs. The goal is simple onboarding for normal Home Assistant users while keeping advanced controls and diagnostics available when the miner supports them.
+<p align="center">
+  Local monitoring and control of ASIC miners from Home Assistant.
+</p>
 
-> **Development status:** the 2.x backend rework is currently under active development on `feature/backend-rework`. Do not treat the development branch as a stable release yet.
+hass-miner provides a capability-driven Home Assistant integration for ASIC miners. It keeps the Home Assistant entity model independent from firmware-specific APIs and uses dedicated backends where a miner needs safer or more reliable handling than a generic library can provide.
 
-## Why this fork exists
+## Highlights
 
-The original integration delegated almost all behavior directly to pyasic. That made broad miner support possible, but it also coupled Home Assistant entities, discovery, configuration writes and firmware quirks tightly to one library.
+- Local polling; no cloud service is required.
+- UI-based setup by IP address or hostname.
+- Hashrate, ideal hashrate, temperatures, board telemetry, fan RPM, power consumption and efficiency where supported.
+- Power-limit control with backend-specific validation.
+- Mining on/off control, miner reboot and mining-backend restart where supported.
+- Diagnostics for troubleshooting and unsupported hardware.
+- Fast failure handling so an offline miner does not hold up Home Assistant startup.
 
-The 2.x architecture introduces explicit miner backends:
+## Antminer S9 with legacy Braiins OS+
 
-- `braiins_legacy` — dedicated safe path for positively identified legacy Braiins/BOSMiner hardware,
-- `pyasic` — compatibility backend for the wider existing miner ecosystem,
-- additional native backends can be added without changing Home Assistant entities.
+The dedicated `braiins_legacy` backend has been tested on real Antminer S9 hardware running Braiins OS+ 22.08.1.
 
-This is especially useful for solar mining, heat reuse, dynamic power control and installations where miners should not simply run at maximum power 24/7.
+For a positively identified S9 it provides:
 
-## Quick start
+- safe power-target control from **400 W to 1400 W in 1 W steps**,
+- independent hardware validation using `/tmp/sysinfo/board_name` and `/etc/bosminer_model.json`,
+- atomic updates of the existing `bosminer.toml` `power_target` only,
+- a dedicated validated backup and automatic rollback on write/restart failure,
+- BOSMiner service start/stop through SSH for reliable Home Assistant mining control,
+- direct BOSer board/chip temperature and fan telemetry when the firmware returns it,
+- short per-field telemetry caching to mask transient BOSer omissions without hiding persistent failures.
 
-1. Install the repository as a custom HACS integration.
-2. Add the **Miner** integration in Home Assistant.
-3. Enter the miner IP address or hostname.
-4. hass-miner detects the miner and asks only for credentials exposed by that device.
-5. Give the device a friendly name.
+The S9 backend deliberately does **not** rebuild the complete BOSMiner configuration through pyasic. This avoids the legacy configuration-corruption failure mode that can overwrite the firmware model metadata.
 
-The normal setup flow no longer asks ordinary users to guess minimum and maximum power values. Generic overrides remain available under the integration's advanced options.
+Fan telemetry on legacy Braiins firmware can occasionally disappear even while mining continues. The integration keeps the last valid values for short dropouts. If the firmware stops returning fan RPM persistently, the **Restart mining backend** button can be used to recover BOSMiner/BOSer telemetry.
+
+## Other miners
+
+Other miners supported by pyasic use the generic compatibility backend. Detection does not imply that every firmware-specific write operation has been independently validated by this project. See [SUPPORTED_MINERS.md](SUPPORTED_MINERS.md) for the current support matrix.
+
+## Installation
+
+### HACS
+
+1. Open HACS.
+2. Add `https://github.com/dhaucke/hass-miner` as a custom **Integration** repository.
+3. Install **Miner**.
+4. Restart Home Assistant.
+5. Go to **Settings → Devices & services → Add integration → Miner**.
+6. Enter the miner IP address or hostname and the credentials requested for that device.
+
+### Manual
+
+Copy `custom_components/miner` into your Home Assistant `custom_components` directory and restart Home Assistant.
 
 ## Entities
 
-Entities are created from backend capabilities and detected topology. hass-miner does not invent three hashboards or four fans when the miner did not report them.
+Entities are created from detected backend capabilities and reported topology. The integration does not invent hashboards or fans that the miner has not reported.
 
 Typical entities include:
 
-- hashrate and ideal hashrate,
-- miner and hashboard temperatures,
-- power consumption,
-- power limit,
-- efficiency,
-- fan speed,
-- hashboard hashrate,
-- mining pause/resume switch.
+- Hashrate / ideal hashrate
+- Power consumption
+- Efficiency
+- Temperature
+- Hashboard temperature / chip temperature / hashrate
+- Fan RPM
+- Power limit
+- Mining switch
+- Reboot button
+- Restart mining backend button
 
 Not every miner exposes every entity.
 
-## Power control safety
+## Power-control safety
 
-Write operations are backend-specific.
+Power writes are backend-specific. Model-specific backends can enforce a validated range even when generic advanced options are configured.
 
-For a legacy Braiins Antminer S9, the dedicated backend requires two independent identity checks before S9-specific power control is enabled:
+For the legacy S9, only an existing integer `[autotuning].power_target` is modified. The integration refuses the write if the device identity, TOML structure, autotuning state or model metadata does not match the validated S9 path.
 
-- `/tmp/sysinfo/board_name` must identify `am1-s9`, and
-- `/etc/bosminer_model.json` must identify `Antminer S9`.
+## Diagnostics and support
 
-The S9 backend does not rebuild the whole `bosminer.toml` file. It validates the existing TOML, changes only an existing `power_target`, creates its own validated backup, writes through a temporary file, atomically replaces the config and rolls back on validation failure.
+For an untested miner or a reproducible integration problem, open a GitHub issue and attach the Home Assistant diagnostics export where useful.
 
-Current development defaults for this validated S9 path are 400–1000 W in 100 W steps.
-
-## Supported miners
-
-See [SUPPORTED_MINERS.md](SUPPORTED_MINERS.md).
-
-Support levels intentionally distinguish between:
-
-- real-device tested,
-- community tested,
-- generic pyasic compatibility,
-- experimental / awaiting hardware testers.
-
-An S19 or S21 is not claimed as fully supported merely because a library can detect it.
-
-## Diagnostics and unsupported hardware
-
-Home Assistant diagnostics are part of the new support strategy. They are intended to provide backend type, detected model/firmware, capability information and topology without requiring users to post passwords or pool credentials.
-
-For hardware we do not own, open an **Unsupported or untested miner** issue and attach the diagnostics export. This allows recorded fixtures and regression tests to be built before write support is considered production-ready.
-
-Never upload passwords, private keys, pool credentials or wallet addresses.
-
-## Advanced options
-
-The standard setup intentionally stays small. Generic minimum and maximum power overrides are available in the integration options for users who know that their firmware requires them.
-
-Model-specific backends may ignore generic ranges when they have a narrower validated safe range.
-
-## Services
-
-Depending on backend capabilities, hass-miner can expose services for:
-
-- rebooting the miner,
-- restarting the mining backend,
-- selecting firmware-defined work modes.
-
-Unsupported operations are rejected instead of being guessed.
+Do not post passwords, SSH keys, pool credentials, wallet addresses or other secrets.
 
 ## Development
 
-The rework plan is documented in [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+Run the same checks used by CI:
 
-CI covers Ruff, pytest, HACS validation and hassfest on development branches. New firmware backends should be capability-driven and include recorded fixtures wherever possible.
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m ruff check .
+python3 -m pytest -q
+```
 
-## Installation during development
-
-In HACS, add this repository as a custom integration repository:
-
-`https://github.com/dhaucke/hass-miner`
-
-For normal users, wait for a tagged 2.x release rather than installing an active feature branch.
+HACS validation and hassfest run in GitHub Actions.
 
 ## Credits and license
 
-This repository is a fork of the original `Schnitzel/hass-miner` project and remains licensed under the MIT License. The original copyright and license notice are preserved in [LICENSE](LICENSE).
+hass-miner is released under the [MIT License](LICENSE).
 
-The compatibility backend continues to use [pyasic](https://github.com/UpstreamData/pyasic) for broad miner support while dedicated backends progressively remove unsafe or firmware-specific write behavior from the generic path.
+This repository is a fork and substantial rework of the original `Schnitzel/hass-miner` project. The original MIT copyright notice is preserved in the license history.
+
+The generic compatibility backend uses [pyasic](https://github.com/UpstreamData/pyasic).
+
+The integration brand icon uses the Google Material Icons `memory` glyph, distributed under the Apache License 2.0 and recolored for hass-miner branding.
