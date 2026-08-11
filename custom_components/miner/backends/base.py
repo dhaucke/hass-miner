@@ -20,7 +20,7 @@ class PowerLimitRange:
 
     minimum: int
     maximum: int
-    step: int = 100
+    step: int = 1
 
     def validate(self, value: int) -> None:
         """Validate a requested power limit."""
@@ -29,7 +29,7 @@ class PowerLimitRange:
                 f"Power limit {value} W is outside the supported range "
                 f"{self.minimum}-{self.maximum} W"
             )
-        if (value - self.minimum) % self.step != 0:
+        if self.step > 1 and (value - self.minimum) % self.step != 0:
             raise ValueError(
                 f"Power limit {value} W does not match the {self.step} W step"
             )
