@@ -168,7 +168,7 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         """Restart BOSMiner through pyasic's established legacy SSH transport."""
         result = await self.miner.ssh.restart_bosminer()
         if not isinstance(result, str):
-            raise RuntimeError("BOSMiner restart did not return a successful response")
+            raise TypeError("BOSMiner restart did not return the expected string response")
 
     async def _wait_for_bosminer(self, *, attempts: int = 12, delay: float = 2.0) -> None:
         """Wait until BOSMiner telemetry responds again after a restart."""
