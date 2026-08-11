@@ -52,15 +52,29 @@ class PyasicBackend:
         self._last_snapshot: MinerSnapshot | None = None
 
     @property
+    def _unsafe_bosminer_config_writes(self) -> bool:
+        """Return whether pyasic would rewrite legacy BOSMiner TOML directly."""
+        return type(self.miner).__name__ == "BOSMiner"
+
+    @property
     def capabilities(self) -> MinerCapabilities:
         """Return features reported by pyasic for the connected miner."""
         supports_power = bool(getattr(self.miner, "supports_autotuning", False))
+        supports_modes = bool(getattr(self.miner, "supports_power_modes", False))
+
+        # Generic legacy BOSMiner devices remain monitor/control-compatible for
+        # non-config operations, but configuration writes are deliberately
+        # disabled. A dedicated validated backend must opt in to those writes.
+        if self._unsafe_bosminer_config_writes:
+            supports_power = False
+            supports_modes = False
+
         return MinerCapabilities(
             power_limit=supports_power,
             pause_resume=bool(getattr(self.miner, "supports_shutdown", False)),
             reboot=hasattr(self.miner, "reboot"),
             restart_backend=hasattr(self.miner, "restart_backend"),
-            power_modes=bool(getattr(self.miner, "supports_power_modes", False)),
+            power_modes=supports_modes,
             fans=bool(getattr(self.miner, "expected_fans", 0)),
             hashboards=bool(getattr(self.miner, "expected_hashboards", 0)),
             diagnostics=True,
@@ -144,21 +158,14 @@ class PyasicBackend:
 
     async def async_set_power_limit(self, value: int) -> None:
         """Set power limit through pyasic for generic compatible miners."""
+        if self._unsafe_bosminer_config_writes:
+            raise UnsafeConfigurationError(
+                "Legacy BOSMiner configuration writes are disabled in the generic "
+                "pyasic backend; a validated dedicated backend is required"
+            )
         if not self.capabilities.power_limit:
             raise BackendUnsupportedError("Power-limit control is not supported")
         self._power_range.validate(value)
-
-        # Old BraiinsOS/BOSMiner pyasic backends rebuild bosminer.toml from
-        # transient runtime metadata. If make/raw_model are missing this can
-        # generate format.model = " " and prevent BOSminer from restarting.
-        if type(self.miner).__name__ == "BOSMiner":
-            make = getattr(self.miner, "make", None)
-            raw_model = getattr(self.miner, "raw_model", None)
-            if not make or not raw_model:
-                raise UnsafeConfigurationError(
-                    "Braiins model detection is incomplete; refusing an unsafe "
-                    "bosminer.toml rewrite"
-                )
 
         result = await self.miner.set_power_limit(value)
         if not result:
@@ -198,6 +205,10 @@ class PyasicBackend:
 
     async def async_set_power_mode(self, mode: str) -> None:
         """Set pyasic power mode through the compatibility layer."""
+        if self._unsafe_bosminer_config_writes:
+            raise UnsafeConfigurationError(
+                "Legacy BOSMiner power-mode writes are disabled in the generic backend"
+            )
         if not self.capabilities.power_modes:
             raise BackendUnsupportedError("Power modes are not supported")
 
@@ -233,6 +244,9 @@ class PyasicBackend:
                 "reboot": self.capabilities.reboot,
                 "restart_backend": self.capabilities.restart_backend,
                 "power_modes": self.capabilities.power_modes,
+            },
+            "safety": {
+                "legacy_bosminer_config_writes_blocked": self._unsafe_bosminer_config_writes,
             },
             "topology": {
                 "hashboards": len(snapshot.hashboards),
