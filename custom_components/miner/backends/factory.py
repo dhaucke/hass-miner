@@ -5,7 +5,7 @@ import logging
 
 from .base import MinerBackend
 from .base import UnsafeConfigurationError
-from .braiins_legacy import BraiinsLegacyS9Backend
+from .braiins_legacy_state import BraiinsLegacyS9Backend
 from .pyasic_backend import PyasicBackend
 
 _LOGGER = logging.getLogger(__name__)
