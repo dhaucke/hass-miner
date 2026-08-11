@@ -37,7 +37,9 @@ async def async_setup_entry(
     """Add number entities for a miner config entry."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    await coordinator.async_config_entry_first_refresh()
+    # The integration setup already performed the initial coordinator refresh.
+    # Platform setup should consume that state rather than issuing duplicate
+    # network calls while Home Assistant is still creating entities.
     if coordinator.backend and coordinator.backend.capabilities.power_limit:
         async_add_entities(
             [
