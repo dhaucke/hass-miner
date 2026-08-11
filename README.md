@@ -1,12 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="custom_components/miner/brand/dark_logo.png">
-  <source media="(prefers-color-scheme: light)" srcset="custom_components/miner/brand/logo.png">
-  <img src="custom_components/miner/brand/logo.png" alt="Miner" width="520">
-</picture>
-
-### Local ASIC miner monitoring and control for Home Assistant
+<img src="assets/miner-banner.svg" alt="Miner - Local ASIC miner monitoring and control for Home Assistant" width="100%">
 
 [![Release](https://img.shields.io/github/v/release/dhaucke/hass-miner?style=flat-square)](https://github.com/dhaucke/hass-miner/releases/latest)
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5?style=flat-square)](https://github.com/hacs/integration)
