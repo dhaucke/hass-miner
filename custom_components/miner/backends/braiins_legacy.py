@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import replace
 
 from .base import BackendKind
+from .base import HashboardData
 from .base import MinerCapabilities
 from .base import PowerLimitRange
 from .base import UnsafeConfigurationError
@@ -120,18 +121,53 @@ def _shell_single_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def _average_board_temperature(rpc_temps: object) -> float | None:
-    """Return the average S9 board temperature from BOSMiner's legacy temps RPC."""
+def _s9_hashboards_from_temps(rpc_temps: object) -> tuple[HashboardData, ...]:
+    """Build real S9 hashboard topology from BOSer's legacy ``temps`` response."""
     if not isinstance(rpc_temps, dict):
-        return None
+        return ()
     rows = rpc_temps.get("TEMPS")
     if not isinstance(rows, list):
-        return None
+        return ()
 
+    boards: list[HashboardData] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        raw_slot = row.get("TEMP")
+        raw_id = row.get("ID")
+        if isinstance(raw_slot, int):
+            slot = raw_slot
+        elif isinstance(raw_id, int) and raw_id in (6, 7, 8):
+            slot = raw_id - 6
+        elif isinstance(raw_id, int):
+            slot = raw_id
+        else:
+            continue
+
+        board_temp = row.get("Board")
+        chip_temp = row.get("Chip")
+        boards.append(
+            HashboardData(
+                slot=slot,
+                temperature=(
+                    float(board_temp) if isinstance(board_temp, (int, float)) else None
+                ),
+                chip_temperature=(
+                    float(chip_temp) if isinstance(chip_temp, (int, float)) else None
+                ),
+            )
+        )
+
+    return tuple(sorted(boards, key=lambda board: board.slot))
+
+
+def _average_board_temperature(rpc_temps: object) -> float | None:
+    """Return the average S9 board temperature from BOSMiner's legacy temps RPC."""
     values = [
-        float(row["Board"])
-        for row in rows
-        if isinstance(row, dict) and isinstance(row.get("Board"), (int, float))
+        board.temperature
+        for board in _s9_hashboards_from_temps(rpc_temps)
+        if board.temperature is not None
     ]
     if not values:
         return None
@@ -187,7 +223,7 @@ class BraiinsLegacyS9Backend(PyasicBackend):
             restart_backend=generic.restart_backend,
             power_modes=False,
             fans=generic.fans,
-            hashboards=generic.hashboards,
+            hashboards=self._identity_validated or generic.hashboards,
             diagnostics=True,
             power_limit_range=S9_POWER_RANGE if self._identity_validated else None,
         )
@@ -214,17 +250,18 @@ class BraiinsLegacyS9Backend(PyasicBackend):
 
         self._identity_validated = True
 
-    async def _read_s9_temperature(self) -> float | None:
-        """Read board temperature without relying on pyasic model detection."""
+    async def _read_s9_hashboards(self) -> tuple[HashboardData, ...]:
+        """Read real S9 board/chip temperatures from BOSer's read-only temps RPC."""
         rpc = getattr(self.miner, "rpc", None)
-        if rpc is not None and hasattr(rpc, "temps"):
-            try:
-                temperature = _average_board_temperature(await rpc.temps())
-            except Exception:
-                temperature = None
-            if temperature is not None:
-                return temperature
+        if rpc is None or not hasattr(rpc, "temps"):
+            return ()
+        try:
+            return _s9_hashboards_from_temps(await rpc.temps())
+        except Exception:
+            return ()
 
+    async def _read_s9_temperature_fallback(self) -> float | None:
+        """Read aggregate board temperature from the local BOSminer CLI fallback."""
         ssh = getattr(self.miner, "ssh", None)
         if ssh is None:
             return None
@@ -240,9 +277,23 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         if not self._identity_validated:
             await self.async_validate_identity()
 
+        hashboards = snapshot.hashboards
+        if not hashboards:
+            hashboards = await self._read_s9_hashboards()
+
         temperature = snapshot.temperature
         if temperature is None:
-            temperature = await self._read_s9_temperature()
+            board_temperatures = [
+                board.temperature
+                for board in hashboards
+                if board.temperature is not None
+            ]
+            if board_temperatures:
+                temperature = round(
+                    sum(board_temperatures) / len(board_temperatures), 2
+                )
+            else:
+                temperature = await self._read_s9_temperature_fallback()
 
         active_profile = snapshot.active_preset_name
         if active_profile is None and snapshot.power_limit is not None:
@@ -260,6 +311,7 @@ class BraiinsLegacyS9Backend(PyasicBackend):
             backend=self.kind,
             temperature=temperature,
             active_preset_name=active_profile,
+            hashboards=hashboards,
         )
         self._last_snapshot = snapshot
         return snapshot
