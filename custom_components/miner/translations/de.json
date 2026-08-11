@@ -1,0 +1,68 @@
+{
+  "title": "Miner",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Miner hinzufügen",
+        "description": "Gib die lokale IP-Adresse oder den Hostnamen des Miners ein. Es werden nicht automatisch ganze Netzwerke durchsucht.",
+        "data": {
+          "ip": "IP-Adresse oder Hostname"
+        }
+      },
+      "login": {
+        "title": "Miner-Zugangsdaten",
+        "description": "{make} {model} wurde unter {host} erkannt. Gib nur die für diesen Miner erforderlichen Zugangsdaten ein. Bei manchen Firmwares wird SSH für eine sichere Leistungssteuerung benötigt.",
+        "data": {
+          "rpc_password": "RPC-Passwort",
+          "web_username": "Web-Benutzername",
+          "web_password": "Web-Passwort",
+          "ssh_username": "SSH-Benutzername",
+          "ssh_password": "SSH-Passwort"
+        }
+      },
+      "finish": {
+        "title": "Miner erkannt",
+        "description": "{make} {model} unter {host} kann hinzugefügt werden.",
+        "data": {
+          "title": "Name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Der Miner ist nicht erreichbar oder antwortet nicht wie erwartet.",
+      "invalid_auth": "Die angegebenen Zugangsdaten wurden abgelehnt."
+    },
+    "abort": {
+      "already_configured": "Dieser Miner ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Erweiterte Leistungseinstellungen",
+        "description": "Überschreibe den allgemeinen Leistungsbereich nur, wenn das Miner-Backend selbst keinen sicheren Bereich bestimmen kann. Modellspezifische Backends können diese Werte ignorieren.",
+        "data": {
+          "min_power": "Minimale Leistung",
+          "max_power": "Maximale Leistung"
+        }
+      }
+    },
+    "error": {
+      "invalid_power_range": "Die minimale Leistung muss kleiner als die maximale Leistung sein."
+    }
+  },
+  "services": {
+    "reboot": {
+      "name": "Miner neu starten",
+      "description": "Startet den Miner neu."
+    },
+    "restart_backend": {
+      "name": "Mining-Backend neu starten",
+      "description": "Startet den Mining-Prozess des Miners neu."
+    },
+    "set_work_mode": {
+      "name": "Arbeitsmodus setzen",
+      "description": "Setzt einen von der Firmware bereitgestellten Leistungsmodus, sofern unterstützt."
+    }
+  }
+}
