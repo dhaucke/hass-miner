@@ -134,6 +134,8 @@ class PyasicBackend:
         try:
             data = await self.miner.get_data(include=options)
         except Exception as err:
+            # Preserve the existing VNish compatibility behavior while keeping
+            # it isolated inside the pyasic backend.
             if "config" not in str(err).lower():
                 raise
             options.remove(pyasic.DataOptions.CONFIG)
@@ -183,71 +185,99 @@ class PyasicBackend:
         return snapshot
 
     async def async_set_power_limit(self, value: int) -> None:
-        """Set the miner power target through pyasic when safe."""
+        """Set power limit through pyasic for generic compatible miners."""
         if self._unsafe_bosminer_config_writes:
             raise UnsafeConfigurationError(
-                "Generic BOSMiner power writes are disabled because pyasic can "
-                "rewrite legacy bosminer.toml with incomplete model metadata"
+                "Legacy BOSMiner configuration writes are disabled in the generic "
+                "pyasic backend; a validated dedicated backend is required"
             )
         if not self.capabilities.power_limit:
-            raise BackendUnsupportedError("Power limit is not supported by this miner")
+            raise BackendUnsupportedError("Power-limit control is not supported")
         self._power_range.validate(value)
-        await self.miner.set_power_limit(value)
+
+        result = await self.miner.set_power_limit(value)
+        if not result:
+            raise RuntimeError("pyasic failed to set the requested power limit")
 
     async def async_pause(self) -> None:
-        """Pause mining through pyasic."""
+        """Pause mining."""
         if not self.capabilities.pause_resume:
-            raise BackendUnsupportedError("Pause/resume is not supported by this miner")
-        await self.miner.stop_mining()
+            raise BackendUnsupportedError("Pause/resume is not supported")
+        result = await self.miner.stop_mining()
+        if result is False:
+            raise RuntimeError("Miner did not acknowledge pause request")
 
     async def async_resume(self) -> None:
-        """Resume mining through pyasic."""
+        """Resume mining."""
         if not self.capabilities.pause_resume:
-            raise BackendUnsupportedError("Pause/resume is not supported by this miner")
-        await self.miner.resume_mining()
+            raise BackendUnsupportedError("Pause/resume is not supported")
+        result = await self.miner.resume_mining()
+        if result is False:
+            raise RuntimeError("Miner did not acknowledge resume request")
 
     async def async_reboot(self) -> None:
-        """Reboot the miner through pyasic."""
+        """Reboot miner."""
         if not self.capabilities.reboot:
-            raise BackendUnsupportedError("Reboot is not supported by this miner")
-        await self.miner.reboot()
+            raise BackendUnsupportedError("Reboot is not supported")
+        result = await self.miner.reboot()
+        if result is False:
+            raise RuntimeError("Miner did not acknowledge reboot request")
 
     async def async_restart_backend(self) -> None:
-        """Restart the mining backend through pyasic."""
+        """Restart firmware mining backend."""
         if not self.capabilities.restart_backend:
-            raise BackendUnsupportedError("Backend restart is not supported by this miner")
-        await self.miner.restart_backend()
+            raise BackendUnsupportedError("Backend restart is not supported")
+        result = await self.miner.restart_backend()
+        if result is False:
+            raise RuntimeError("Miner did not acknowledge backend restart request")
 
     async def async_set_power_mode(self, mode: str) -> None:
-        """Set a firmware-defined power mode through pyasic."""
+        """Set pyasic power mode through the compatibility layer."""
         if self._unsafe_bosminer_config_writes:
             raise UnsafeConfigurationError(
-                "Generic BOSMiner power-mode writes are disabled because pyasic can "
-                "rewrite legacy bosminer.toml with incomplete model metadata"
+                "Legacy BOSMiner power-mode writes are disabled in the generic backend"
             )
         if not self.capabilities.power_modes:
-            raise BackendUnsupportedError("Power modes are not supported by this miner")
+            raise BackendUnsupportedError("Power modes are not supported")
 
-        from pyasic.config import MiningModePreset
+        from pyasic.config.mining import MiningModeConfig
 
-        await self.miner.set_power_mode(MiningModePreset(mode))
+        modes = {
+            "high": MiningModeConfig.high,
+            "normal": MiningModeConfig.normal,
+            "low": MiningModeConfig.low,
+        }
+        factory = modes.get(mode)
+        if factory is None:
+            raise ValueError(f"Unsupported power mode: {mode}")
+
+        config = await self.miner.get_config()
+        config.mining_mode = factory()
+        await self.miner.send_config(config)
 
     async def async_diagnostics(self) -> dict[str, object]:
-        """Return backend diagnostics without credentials or pool configuration."""
-        snapshot = self._last_snapshot
+        """Return sanitized generic diagnostics without credentials or pools."""
+        snapshot = self._last_snapshot or await self.async_refresh()
         return {
             "backend": self.kind.value,
-            "miner_type": type(self.miner).__name__,
-            "manufacturer": snapshot.manufacturer if snapshot else None,
-            "model": snapshot.model if snapshot else None,
-            "firmware": snapshot.firmware if snapshot else None,
+            "host": snapshot.host,
+            "manufacturer": snapshot.manufacturer,
+            "model": snapshot.model,
+            "firmware": snapshot.firmware,
+            "hostname": snapshot.hostname,
+            "is_mining": snapshot.is_mining,
             "capabilities": {
                 "power_limit": self.capabilities.power_limit,
                 "pause_resume": self.capabilities.pause_resume,
                 "reboot": self.capabilities.reboot,
                 "restart_backend": self.capabilities.restart_backend,
                 "power_modes": self.capabilities.power_modes,
-                "fans": self.capabilities.fans,
-                "hashboards": self.capabilities.hashboards,
+            },
+            "safety": {
+                "legacy_bosminer_config_writes_blocked": self._unsafe_bosminer_config_writes,
+            },
+            "topology": {
+                "hashboards": len(snapshot.hashboards),
+                "fans": len(snapshot.fans),
             },
         }
