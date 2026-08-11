@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import replace
 
 from .base import BackendKind
+from .base import FanData
 from .base import HashboardData
 from .base import MinerCapabilities
 from .base import PowerLimitRange
@@ -25,6 +26,7 @@ S9_BOARD_NAME = "am1-s9"
 S9_MODEL = "Antminer S9"
 S9_MANUFACTURER = "Bitmain"
 S9_POWER_RANGE = PowerLimitRange(minimum=400, maximum=1400, step=100)
+S9_TELEMETRY_MISS_LIMIT = 3
 
 BACKUP_PATH = "/etc/bosminer.toml.hass-miner.bak"
 TEMP_PATH = "/etc/bosminer.toml.hass-miner.tmp"
@@ -57,8 +59,6 @@ def _validated_s9_config(raw_config: str) -> dict:
             "Existing autotuning config is not enabled; refusing power-target write"
         )
 
-    # Braiins OS+ 22.08.1 can emit a valid S9 config with power_target but no
-    # explicit mode. An explicit mode is still required to be power_target.
     mode = autotuning.get("mode")
     if mode is not None and mode != "power_target":
         raise UnsafeConfigurationError(
@@ -104,7 +104,7 @@ def update_power_target(raw_config: str, value: int) -> str:
     )
     line = lines[index].rstrip("\r\n")
     match = _POWER_TARGET_RE.match(line)
-    if match is None:  # Defensive: the line was matched above.
+    if match is None:
         raise UnsafeConfigurationError("Could not safely patch power_target")
     lines[index] = f"{match.group('prefix')}{value}{match.group('suffix')}{newline}"
     updated = "".join(lines)
@@ -162,16 +162,60 @@ def _s9_hashboards_from_temps(rpc_temps: object) -> tuple[HashboardData, ...]:
     return tuple(sorted(boards, key=lambda board: board.slot))
 
 
-def _average_board_temperature(rpc_temps: object) -> float | None:
-    """Return the average S9 board temperature from BOSMiner's legacy temps RPC."""
-    values = [
-        board.temperature
-        for board in _s9_hashboards_from_temps(rpc_temps)
-        if board.temperature is not None
-    ]
-    if not values:
-        return None
-    return round(sum(values) / len(values), 2)
+def _s9_fans_from_rpc(rpc_fans: object) -> tuple[FanData, ...]:
+    """Return populated S9 fans from BOSer's legacy ``fans`` response."""
+    if not isinstance(rpc_fans, dict):
+        return ()
+    rows = rpc_fans.get("FANS")
+    if not isinstance(rows, list):
+        return ()
+
+    fans: list[FanData] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_index = row.get("FAN", row.get("ID"))
+        raw_rpm = row.get("RPM")
+        if not isinstance(raw_index, int) or not isinstance(raw_rpm, (int, float)):
+            continue
+        rpm = int(raw_rpm)
+        if rpm <= 0:
+            continue
+        fans.append(FanData(index=raw_index, speed=rpm))
+
+    return tuple(sorted(fans, key=lambda fan: fan.index))
+
+
+def _merge_hashboards(
+    primary: tuple[HashboardData, ...],
+    temperatures: tuple[HashboardData, ...],
+) -> tuple[HashboardData, ...]:
+    """Merge pyasic hashrates with authoritative BOSer board temperatures."""
+    primary_by_slot = {board.slot: board for board in primary}
+    temperatures_by_slot = {board.slot: board for board in temperatures}
+    slots = sorted(primary_by_slot.keys() | temperatures_by_slot.keys())
+
+    merged: list[HashboardData] = []
+    for slot in slots:
+        current = primary_by_slot.get(slot)
+        temp = temperatures_by_slot.get(slot)
+        merged.append(
+            HashboardData(
+                slot=slot,
+                temperature=(
+                    temp.temperature
+                    if temp is not None and temp.temperature is not None
+                    else current.temperature if current is not None else None
+                ),
+                chip_temperature=(
+                    temp.chip_temperature
+                    if temp is not None and temp.chip_temperature is not None
+                    else current.chip_temperature if current is not None else None
+                ),
+                hashrate=current.hashrate if current is not None else None,
+            )
+        )
+    return tuple(merged)
 
 
 def _work_solver_board_temperature(raw_work_solvers: str) -> float | None:
@@ -211,6 +255,10 @@ class BraiinsLegacyS9Backend(PyasicBackend):
             power_step=S9_POWER_RANGE.step,
         )
         self._identity_validated = False
+        self._board_cache: dict[int, HashboardData] = {}
+        self._board_misses: dict[int, int] = {}
+        self._fan_cache: dict[int, FanData] = {}
+        self._fan_misses: dict[int, int] = {}
 
     @property
     def capabilities(self) -> MinerCapabilities:
@@ -222,7 +270,7 @@ class BraiinsLegacyS9Backend(PyasicBackend):
             reboot=generic.reboot,
             restart_backend=generic.restart_backend,
             power_modes=False,
-            fans=generic.fans,
+            fans=self._identity_validated or generic.fans,
             hashboards=self._identity_validated or generic.hashboards,
             diagnostics=True,
             power_limit_range=S9_POWER_RANGE if self._identity_validated else None,
@@ -260,6 +308,88 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         except Exception:
             return ()
 
+    async def _read_s9_fans(self) -> tuple[FanData, ...]:
+        """Read populated S9 fans from BOSer's read-only fans RPC."""
+        rpc = getattr(self.miner, "rpc", None)
+        if rpc is None or not hasattr(rpc, "fans"):
+            return ()
+        try:
+            return _s9_fans_from_rpc(await rpc.fans())
+        except Exception:
+            return ()
+
+    def _stabilize_hashboards(
+        self, boards: tuple[HashboardData, ...]
+    ) -> tuple[HashboardData, ...]:
+        """Keep the last valid board telemetry across short BOSer dropouts."""
+        current = {board.slot: board for board in boards}
+        slots = sorted(current.keys() | self._board_cache.keys())
+        stabilized: list[HashboardData] = []
+
+        for slot in slots:
+            board = current.get(slot)
+            cached = self._board_cache.get(slot)
+            if board is not None and (
+                board.temperature is not None
+                or board.chip_temperature is not None
+                or board.hashrate is not None
+            ):
+                merged = HashboardData(
+                    slot=slot,
+                    temperature=(
+                        board.temperature
+                        if board.temperature is not None
+                        else cached.temperature if cached is not None else None
+                    ),
+                    chip_temperature=(
+                        board.chip_temperature
+                        if board.chip_temperature is not None
+                        else cached.chip_temperature if cached is not None else None
+                    ),
+                    hashrate=(
+                        board.hashrate
+                        if board.hashrate is not None
+                        else cached.hashrate if cached is not None else None
+                    ),
+                )
+                self._board_cache[slot] = merged
+                self._board_misses[slot] = 0
+                stabilized.append(merged)
+                continue
+
+            misses = self._board_misses.get(slot, 0) + 1
+            self._board_misses[slot] = misses
+            if cached is not None and misses < S9_TELEMETRY_MISS_LIMIT:
+                stabilized.append(cached)
+            else:
+                stabilized.append(HashboardData(slot=slot))
+
+        return tuple(stabilized)
+
+    def _stabilize_fans(self, fans: tuple[FanData, ...]) -> tuple[FanData, ...]:
+        """Keep populated fan RPM across short BOSer dropouts."""
+        current = {fan.index: fan for fan in fans if fan.speed is not None and fan.speed > 0}
+        indexes = sorted(current.keys() | self._fan_cache.keys())
+        stabilized: list[FanData] = []
+
+        for index in indexes:
+            fan = current.get(index)
+            cached = self._fan_cache.get(index)
+            if fan is not None:
+                self._fan_cache[index] = fan
+                self._fan_misses[index] = 0
+                stabilized.append(fan)
+                continue
+
+            misses = self._fan_misses.get(index, 0) + 1
+            self._fan_misses[index] = misses
+            if cached is not None and misses < S9_TELEMETRY_MISS_LIMIT:
+                stabilized.append(cached)
+            else:
+                stabilized.append(FanData(index=index, speed=None))
+
+        return tuple(stabilized)
+
     async def _read_s9_temperature_fallback(self) -> float | None:
         """Read aggregate board temperature from the local BOSminer CLI fallback."""
         ssh = getattr(self.miner, "ssh", None)
@@ -277,33 +407,34 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         if not self._identity_validated:
             await self.async_validate_identity()
 
-        hashboards = snapshot.hashboards
-        if not hashboards:
-            hashboards = await self._read_s9_hashboards()
+        boser_hashboards = await self._read_s9_hashboards()
+        hashboards = _merge_hashboards(snapshot.hashboards, boser_hashboards)
+        hashboards = self._stabilize_hashboards(hashboards)
 
-        temperature = snapshot.temperature
-        if temperature is None:
-            board_temperatures = [
-                board.temperature
-                for board in hashboards
-                if board.temperature is not None
-            ]
-            if board_temperatures:
-                temperature = round(
-                    sum(board_temperatures) / len(board_temperatures), 2
-                )
-            else:
+        boser_fans = await self._read_s9_fans()
+        fans = self._stabilize_fans(boser_fans)
+
+        board_temperatures = [
+            board.temperature for board in hashboards if board.temperature is not None
+        ]
+        if board_temperatures:
+            temperature = round(sum(board_temperatures) / len(board_temperatures), 2)
+        else:
+            temperature = snapshot.temperature
+            if temperature is None:
                 temperature = await self._read_s9_temperature_fallback()
 
         active_profile = snapshot.active_preset_name
-        if active_profile is None and snapshot.power_limit is not None:
+        if (
+            snapshot.power_limit is not None
+            and (
+                active_profile is None
+                or not str(active_profile).strip()
+                or str(active_profile).strip().lower() in {"unknown", "unbekannt", "none"}
+            )
+        ):
             active_profile = "Power Target"
 
-        # pyasic 0.78.8 may report empty make/model for this legacy BOS+ build.
-        # Once the two independent firmware identity checks have passed, use
-        # that stronger evidence for Home Assistant device metadata. The same
-        # build can also omit topology-derived temperature and preset metadata,
-        # so fill those from verified read-only BOSMiner telemetry.
         snapshot = replace(
             snapshot,
             manufacturer=S9_MANUFACTURER,
@@ -312,6 +443,7 @@ class BraiinsLegacyS9Backend(PyasicBackend):
             temperature=temperature,
             active_preset_name=active_profile,
             hashboards=hashboards,
+            fans=fans,
         )
         self._last_snapshot = snapshot
         return snapshot
@@ -333,7 +465,7 @@ class BraiinsLegacyS9Backend(PyasicBackend):
                 await asyncio.sleep(delay)
             try:
                 await super().async_refresh()
-            except Exception as err:  # The daemon may still be starting.
+            except Exception as err:
                 last_error = err
                 continue
             return
@@ -370,15 +502,11 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         raw_config = await ssh.get_config_file()
         updated = update_power_target(raw_config, value)
 
-        # A dedicated backup is created only from an already validated config,
-        # then read back and validated before the active file is touched.
         await ssh.send_command(
             f"cp {ACTIVE_CONFIG_PATH} {BACKUP_PATH} && fsync {BACKUP_PATH}"
         )
         await self._validate_backup(raw_config)
 
-        # printf with a POSIX-safe single-quoted argument preserves the exact
-        # candidate text, including its original terminal-newline state.
         payload = _shell_single_quote(updated)
         write_command = (
             f"printf %s {payload} > {TEMP_PATH} && "
