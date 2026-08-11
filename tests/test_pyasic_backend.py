@@ -24,17 +24,20 @@ class FakeHashrate:
     """Mimic pyasic's unit-aware hashrate object."""
 
     def __init__(self, rate: float, unit: str = "H") -> None:
+        """Store a synthetic rate and its current unit name."""
         self.rate = rate
         self.unit = FakeHashrateUnit()
         self._unit_name = unit
 
-    def into(self, target) -> "FakeHashrate":
+    def into(self, target) -> FakeHashrate:
+        """Convert the synthetic rate into TH/s."""
         assert target == FakeHashrateUnit.TH
         if self._unit_name == "H":
             return FakeHashrate(self.rate / 1_000_000_000_000, "TH")
         return FakeHashrate(self.rate, "TH")
 
     def __float__(self) -> float:
+        """Return the numeric rate in the current synthetic unit."""
         return float(self.rate)
 
 
