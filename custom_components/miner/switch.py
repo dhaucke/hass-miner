@@ -23,7 +23,6 @@ async def async_setup_entry(
     """Add switch entities for the config entry."""
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    await coordinator.async_config_entry_first_refresh()
     if coordinator.backend and coordinator.backend.capabilities.pause_resume:
         async_add_entities([MinerActiveSwitch(coordinator=coordinator)])
 
