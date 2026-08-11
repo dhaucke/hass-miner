@@ -67,19 +67,26 @@ def test_update_power_target_changes_only_target() -> None:
 
 def test_update_power_target_accepts_verified_22081_schema_without_mode() -> None:
     """Braiins 22.08.1 BOSer config may omit mode while retaining power_target."""
-    updated = update_power_target(BRAIINS_22081_CONFIG, 600)
+    updated = update_power_target(BRAIINS_22081_CONFIG, 1400)
 
-    assert "power_target = 600" in updated
+    assert "power_target = 1400" in updated
     assert "mode =" not in updated
     assert "generator = 'BOSer (boser-openwrt 0.1.0-26ba61b9)'" in updated
-    assert updated.replace("power_target = 600", "power_target = 1200") == BRAIINS_22081_CONFIG
+    assert updated.replace("power_target = 1400", "power_target = 1200") == BRAIINS_22081_CONFIG
 
 
-@pytest.mark.parametrize("value", [399, 1100, 450])
+@pytest.mark.parametrize("value", [399, 1500, 450])
 def test_update_power_target_rejects_unsafe_range(value: int) -> None:
     """S9-specific range and step must be enforced before a write."""
     with pytest.raises(ValueError):
         update_power_target(VALID_CONFIG, value)
+
+
+def test_update_power_target_accepts_full_verified_range() -> None:
+    """Allow 400-1400 W in 100 W steps for the validated S9 backend."""
+    for value in range(400, 1401, 100):
+        updated = update_power_target(VALID_CONFIG, value)
+        assert f"power_target = {value}" in updated
 
 
 def test_update_power_target_rejects_blank_model() -> None:
