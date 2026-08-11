@@ -122,8 +122,11 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema_data = {}
 
-        rpc = getattr(self._miner, "rpc", None)
-        if rpc is not None and getattr(rpc, "pwd", None) is not None:
+        # pyasic exposes its RPC-style transport as ``api``. Keep the stored
+        # option name RPC for backward compatibility, but inspect and configure
+        # the same runtime object consistently here and in the coordinator.
+        api = getattr(self._miner, "api", None)
+        if api is not None and getattr(api, "pwd", None) is not None:
             schema_data[
                 vol.Optional(
                     CONF_RPC_PASSWORD,
