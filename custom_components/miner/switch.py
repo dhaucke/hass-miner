@@ -16,7 +16,8 @@ from .entity import MinerEntity
 
 _LOGGER = logging.getLogger(__name__)
 
-BOSMINER_CONTROL_TIMEOUT_SECONDS = 5.0
+BOSMINER_CONTROL_TIMEOUT_SECONDS = 8.0
+BOSMINER_STATE_POLL_INTERVAL_SECONDS = 0.25
 _BOSMINER_RUNNING_MARKER = "__HASS_MINER_BOS_RUNNING__"
 _BOSMINER_STOPPED_MARKER = "__HASS_MINER_BOS_STOPPED__"
 
@@ -58,8 +59,22 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
             return True
         return super().available
 
+    async def _async_bosminer_is_running(self, ssh) -> bool:
+        """Return the BOSMiner process state from an unambiguous SSH marker."""
+        command = (
+            "if pidof bosminer >/dev/null 2>&1; then "
+            f"echo {_BOSMINER_RUNNING_MARKER}; "
+            f"else echo {_BOSMINER_STOPPED_MARKER}; fi"
+        )
+        result = await ssh.send_command(command)
+        if _BOSMINER_RUNNING_MARKER in result:
+            return True
+        if _BOSMINER_STOPPED_MARKER in result:
+            return False
+        raise RuntimeError("Unable to determine BOSMiner process state over SSH")
+
     async def _async_set_bosminer_service(self, running: bool) -> None:
-        """Start or stop BOSMiner through SSH and verify the resulting process state."""
+        """Start or stop BOSMiner through SSH and wait for the requested state."""
         backend = self.coordinator.backend
         if backend is None:
             raise RuntimeError("Miner backend is not available")
@@ -70,26 +85,25 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
             raise RuntimeError("SSH is not available for BOSMiner service control")
 
         action = "start" if running else "stop"
-        command = (
-            f"/etc/init.d/bosminer {action}; "
-            f"if pidof bosminer >/dev/null 2>&1; then "
-            f"echo {_BOSMINER_RUNNING_MARKER}; "
-            f"else echo {_BOSMINER_STOPPED_MARKER}; fi"
-        )
+        requested_state = "running" if running else "stopped"
 
         try:
             async with asyncio.timeout(BOSMINER_CONTROL_TIMEOUT_SECONDS):
-                result = await ssh.send_command(command)
+                # Treat an already-reached state as success. This makes the switch
+                # idempotent when BOSMiner was changed from its own web interface.
+                if await self._async_bosminer_is_running(ssh) != running:
+                    await ssh.send_command(f"/etc/init.d/bosminer {action}")
+
+                    # The legacy init script can return before BOSMiner has fully
+                    # started or exited. Poll the actual process state instead of
+                    # checking it once in the same shell command.
+                    while await self._async_bosminer_is_running(ssh) != running:
+                        await asyncio.sleep(BOSMINER_STATE_POLL_INTERVAL_SECONDS)
         except TimeoutError as err:
             raise RuntimeError(
-                f"BOSMiner {action} timed out after {BOSMINER_CONTROL_TIMEOUT_SECONDS:g}s"
+                f"BOSMiner did not reach the requested {requested_state} state "
+                f"within {BOSMINER_CONTROL_TIMEOUT_SECONDS:g}s"
             ) from err
-
-        expected = _BOSMINER_RUNNING_MARKER if running else _BOSMINER_STOPPED_MARKER
-        if expected not in result:
-            raise RuntimeError(
-                f"BOSMiner did not reach the requested {'running' if running else 'stopped'} state"
-            )
 
         # Do not synchronously refresh here. A stopped BOSMiner has no telemetry,
         # and waiting for it would turn an intentional OFF command into a failed
