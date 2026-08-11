@@ -21,7 +21,7 @@ from .pyasic_backend import PyasicBackend
 
 S9_BOARD_NAME = "am1-s9"
 S9_MODEL = "Antminer S9"
-S9_POWER_RANGE = PowerLimitRange(minimum=400, maximum=1000, step=100)
+S9_POWER_RANGE = PowerLimitRange(minimum=400, maximum=1400, step=100)
 
 BACKUP_PATH = "/etc/bosminer.toml.hass-miner.bak"
 TEMP_PATH = "/etc/bosminer.toml.hass-miner.tmp"
