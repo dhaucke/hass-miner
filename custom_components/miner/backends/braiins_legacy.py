@@ -3,7 +3,7 @@
 The first implementation intentionally reuses pyasic for telemetry and SSH
 transport, but it does not use pyasic's BOSMiner.send_config() write path.
 That write path rebuilds the complete TOML document from transient metadata and
-can corrupt ``[format].model``.  This backend changes only the existing
+can corrupt ``[format].model``. This backend changes only the existing
 ``power_target`` value after independently validating the target S9 identity.
 """
 from __future__ import annotations
@@ -22,15 +22,17 @@ S9_BOARD_NAME = "am1-s9"
 S9_MODEL = "Antminer S9"
 S9_POWER_RANGE = PowerLimitRange(minimum=400, maximum=1000, step=100)
 
+BACKUP_PATH = "/etc/bosminer.toml.hass-miner.bak"
+TEMP_PATH = "/etc/bosminer.toml.hass-miner.tmp"
+
+_SECTION_RE = re.compile(r"^\s*\[([^]]+)]\s*(?:#.*)?$")
 _POWER_TARGET_RE = re.compile(
-    r"(?m)^(?P<prefix>\s*power_target\s*=\s*)(?P<value>\d+)(?P<suffix>\s*(?:#.*)?)$"
+    r"^(?P<prefix>\s*power_target\s*=\s*)(?P<value>\d+)(?P<suffix>\s*(?:#.*)?)$"
 )
 
 
-def update_power_target(raw_config: str, value: int) -> str:
-    """Return config with only an existing power_target value changed."""
-    S9_POWER_RANGE.validate(value)
-
+def _validated_s9_config(raw_config: str) -> dict:
+    """Parse and validate a writable legacy S9 BOSMiner configuration."""
     try:
         parsed = tomllib.loads(raw_config)
     except tomllib.TOMLDecodeError as err:
@@ -49,29 +51,49 @@ def update_power_target(raw_config: str, value: int) -> str:
         raise UnsafeConfigurationError(
             "Existing autotuning mode is not power_target; refusing schema change"
         )
-    if "power_target" not in autotuning:
+    if not isinstance(autotuning.get("power_target"), int):
         raise UnsafeConfigurationError(
-            "Existing autotuning config has no power_target; refusing schema change"
+            "Existing autotuning config has no integer power_target; refusing schema change"
         )
 
-    updated, replacements = _POWER_TARGET_RE.subn(
-        lambda match: f"{match.group('prefix')}{value}{match.group('suffix')}",
-        raw_config,
-        count=1,
+    return parsed
+
+
+def update_power_target(raw_config: str, value: int) -> str:
+    """Return config with only ``[autotuning].power_target`` changed."""
+    S9_POWER_RANGE.validate(value)
+    _validated_s9_config(raw_config)
+
+    lines = raw_config.splitlines(keepends=True)
+    section: str | None = None
+    matches: list[int] = []
+
+    for index, line in enumerate(lines):
+        section_match = _SECTION_RE.match(line.rstrip("\r\n"))
+        if section_match:
+            section = section_match.group(1).strip()
+            continue
+        if section == "autotuning" and _POWER_TARGET_RE.match(line.rstrip("\r\n")):
+            matches.append(index)
+
+    if len(matches) != 1:
+        raise UnsafeConfigurationError(
+            "Could not locate exactly one [autotuning].power_target assignment"
+        )
+
+    index = matches[0]
+    newline = "\r\n" if lines[index].endswith("\r\n") else "\n" if lines[index].endswith("\n") else ""
+    line = lines[index].rstrip("\r\n")
+    match = _POWER_TARGET_RE.match(line)
+    if match is None:  # Defensive: the line was matched above.
+        raise UnsafeConfigurationError("Could not safely patch power_target")
+    lines[index] = (
+        f"{match.group('prefix')}{value}{match.group('suffix')}{newline}"
     )
-    if replacements != 1:
-        raise UnsafeConfigurationError(
-            "Could not locate exactly one power_target assignment in bosminer.toml"
-        )
+    updated = "".join(lines)
 
-    # Parse the candidate again before it can ever reach the miner.
-    try:
-        candidate = tomllib.loads(updated)
-    except tomllib.TOMLDecodeError as err:
-        raise UnsafeConfigurationError("Generated bosminer.toml is invalid") from err
-    if candidate.get("format", {}).get("model") != S9_MODEL:
-        raise UnsafeConfigurationError("Candidate config lost the validated S9 model")
-    if candidate.get("autotuning", {}).get("power_target") != value:
+    candidate = _validated_s9_config(updated)
+    if candidate["autotuning"].get("power_target") != value:
         raise UnsafeConfigurationError("Candidate power_target validation failed")
 
     return updated
@@ -109,7 +131,7 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         )
 
     async def async_validate_identity(self) -> None:
-        """Validate hardware identity from two independent firmware sources."""
+        """Validate S9 identity before enabling S9-specific write controls."""
         ssh = getattr(self.miner, "ssh", None)
         if ssh is None:
             raise UnsafeConfigurationError("SSH is required for legacy Braiins S9 control")
@@ -125,17 +147,30 @@ class BraiinsLegacyS9Backend(PyasicBackend):
 
         if board_name != S9_BOARD_NAME or model_data.get("model") != S9_MODEL:
             raise UnsafeConfigurationError(
-                "Legacy Braiins device is not independently identified as Antminer S9"
+                "Legacy Braiins device is not positively identified as Antminer S9"
             )
 
         self._identity_validated = True
 
     async def async_refresh(self):
-        """Refresh telemetry and validate S9 identity once before write controls appear."""
+        """Refresh telemetry and validate S9 identity before write controls appear."""
         snapshot = await super().async_refresh()
         if not self._identity_validated:
             await self.async_validate_identity()
         return snapshot
+
+    async def _restart_bosminer(self) -> None:
+        """Restart BOSMiner through pyasic's established legacy SSH transport."""
+        result = await self.miner.ssh.restart_bosminer()
+        if not isinstance(result, str):
+            raise RuntimeError("BOSMiner restart did not return a successful response")
+
+    async def _validate_backup(self, original: str) -> None:
+        """Verify the dedicated backup is byte-for-byte valid before any write."""
+        backup = await self.miner.ssh.send_command(f"cat {BACKUP_PATH}")
+        if backup != original:
+            raise UnsafeConfigurationError("Dedicated BOSMiner backup verification failed")
+        _validated_s9_config(backup)
 
     async def async_set_power_limit(self, value: int) -> None:
         """Safely change only power_target with backup, atomic replace and rollback."""
@@ -147,41 +182,39 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         raw_config = await ssh.get_config_file()
         updated = update_power_target(raw_config, value)
 
-        # Keep a dedicated HA backup only after the current config passed all
-        # validation. Never trust or overwrite the firmware's generic .bak file.
-        await ssh.send_command(
-            "cp /etc/bosminer.toml /etc/bosminer.toml.ha-backup && "
-            "fsync /etc/bosminer.toml.ha-backup"
-        )
+        # A dedicated backup is created only from an already validated config,
+        # then read back and validated before the active file is touched.
+        await ssh.send_command(f"cp /etc/bosminer.toml {BACKUP_PATH}")
+        await self._validate_backup(raw_config)
 
         delimiter = "__HASS_MINER_BOS_CONFIG__"
         if delimiter in updated:
             raise UnsafeConfigurationError("Unexpected heredoc delimiter in config")
+
         write_command = (
-            "cat > /etc/bosminer.toml.ha-tmp <<'"
-            + delimiter
-            + "'\n"
-            + updated
-            + "\n"
-            + delimiter
-            + "\n"
-            + "mv /etc/bosminer.toml.ha-tmp /etc/bosminer.toml && "
-            + "fsync /etc/bosminer.toml && /etc/init.d/bosminer reload"
+            f"cat > {TEMP_PATH} <<'{delimiter}'\n"
+            f"{updated}\n"
+            f"{delimiter}\n"
+            f"mv -f {TEMP_PATH} /etc/bosminer.toml"
         )
 
         try:
             await ssh.send_command(write_command)
-            # Re-read after the atomic replace. This validates what actually
-            # reached persistent storage before reporting success to HA.
             written = await ssh.get_config_file()
-            parsed = tomllib.loads(written)
-            if parsed.get("format", {}).get("model") != S9_MODEL:
-                raise UnsafeConfigurationError("Written config has invalid model")
-            if parsed.get("autotuning", {}).get("power_target") != value:
+            parsed = _validated_s9_config(written)
+            if parsed["autotuning"].get("power_target") != value:
                 raise UnsafeConfigurationError("Written power_target does not match request")
-        except Exception:
-            await ssh.send_command(
-                "cp /etc/bosminer.toml.ha-backup /etc/bosminer.toml && "
-                "fsync /etc/bosminer.toml && /etc/init.d/bosminer reload"
-            )
-            raise
+            await self._restart_bosminer()
+        except Exception as write_err:
+            try:
+                await ssh.send_command(f"cp {BACKUP_PATH} /etc/bosminer.toml")
+                restored = await ssh.get_config_file()
+                if restored != raw_config:
+                    raise UnsafeConfigurationError("BOSMiner rollback verification failed")
+                _validated_s9_config(restored)
+                await self._restart_bosminer()
+            except Exception as rollback_err:
+                raise UnsafeConfigurationError(
+                    "Power target update failed and automatic rollback could not be verified"
+                ) from rollback_err
+            raise write_err
