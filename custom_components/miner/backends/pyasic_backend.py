@@ -1,12 +1,12 @@
 """Generic pyasic compatibility backend.
 
-This adapter deliberately owns a single pyasic miner instance.  The Home
+This adapter deliberately owns a single pyasic miner instance. The Home
 Assistant coordinator should reuse the backend rather than rediscovering a new
 miner object on every refresh.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .base import BackendKind
 from .base import BackendUnsupportedError
@@ -136,6 +136,7 @@ class PyasicBackend:
             active_preset_name=active_preset,
             hashboards=hashboards,
             fans=fans,
+            raw_config=data.config,
         )
         self._last_snapshot = snapshot
         return snapshot
