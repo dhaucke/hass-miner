@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 REQUEST_REFRESH_DEFAULT_COOLDOWN = 5
+DEFAULT_MIN_POWER = 15
+DEFAULT_MAX_POWER = 10000
 
 DEFAULT_DATA = {
     "hostname": None,
@@ -83,6 +85,23 @@ class MinerCoordinator(DataUpdateCoordinator):
         """Return whether the miner has a backend and the last update succeeded."""
         return self.backend is not None and self.last_update_success
 
+    def _option(self, key: str, default):
+        """Return an option, falling back to legacy config-entry data."""
+        return self.config_entry.options.get(
+            key,
+            self.config_entry.data.get(key, default),
+        )
+
+    @property
+    def configured_min_power(self) -> int:
+        """Return generic minimum power override."""
+        return int(self._option(CONF_MIN_POWER, DEFAULT_MIN_POWER))
+
+    @property
+    def configured_max_power(self) -> int:
+        """Return generic maximum power override."""
+        return int(self._option(CONF_MAX_POWER, DEFAULT_MAX_POWER))
+
     async def get_miner(self):
         """Return the persistent pyasic miner used for discovery/compatibility."""
         if self.miner is not None:
@@ -109,8 +128,8 @@ class MinerCoordinator(DataUpdateCoordinator):
         self.miner = miner
         self.backend = await async_create_backend(
             miner,
-            minimum_power=self.config_entry.data.get(CONF_MIN_POWER, 15),
-            maximum_power=self.config_entry.data.get(CONF_MAX_POWER, 10000),
+            minimum_power=self.configured_min_power,
+            maximum_power=self.configured_max_power,
         )
         _LOGGER.info(
             "%s: selected %s backend for %s",
@@ -126,8 +145,8 @@ class MinerCoordinator(DataUpdateCoordinator):
             **DEFAULT_DATA,
             "ip": self.config_entry.data.get(CONF_IP),
             "power_limit_range": {
-                "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
-                "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
+                "min": self.configured_min_power,
+                "max": self.configured_max_power,
                 "step": 100,
             },
         }
@@ -206,12 +225,8 @@ class MinerCoordinator(DataUpdateCoordinator):
             },
             "config": snapshot.raw_config,
             "power_limit_range": {
-                "min": power_range.minimum
-                if power_range
-                else self.config_entry.data.get(CONF_MIN_POWER, 15),
-                "max": power_range.maximum
-                if power_range
-                else self.config_entry.data.get(CONF_MAX_POWER, 10000),
+                "min": power_range.minimum if power_range else self.configured_min_power,
+                "max": power_range.maximum if power_range else self.configured_max_power,
                 "step": power_range.step if power_range else 100,
             },
         }
