@@ -1,10 +1,9 @@
 """Miner DataUpdateCoordinator."""
+from __future__ import annotations
+
 import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import pyasic
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -12,18 +11,21 @@ from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
+from .backends.pyasic_backend import PyasicBackend
 from .const import CONF_IP
-from .const import CONF_MIN_POWER
 from .const import CONF_MAX_POWER
+from .const import CONF_MIN_POWER
 from .const import CONF_RPC_PASSWORD
 from .const import CONF_SSH_PASSWORD
 from .const import CONF_SSH_USERNAME
 from .const import CONF_WEB_PASSWORD
 from .const import CONF_WEB_USERNAME
 
+if TYPE_CHECKING:
+    import pyasic
+
 _LOGGER = logging.getLogger(__name__)
 
-# Matches iotwatt data log interval
 REQUEST_REFRESH_DEFAULT_COOLDOWN = 5
 
 DEFAULT_DATA = {
@@ -34,6 +36,8 @@ DEFAULT_DATA = {
     "ip": None,
     "is_mining": False,
     "fw_ver": None,
+    "backend": None,
+    "capabilities": {},
     "miner_sensors": {
         "hashrate": 0,
         "ideal_hashrate": 0,
@@ -45,18 +49,19 @@ DEFAULT_DATA = {
     },
     "board_sensors": {},
     "fan_sensors": {},
-    "config": {},
+    "config": None,
 }
 
 
 class MinerCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching update data from the Miner."""
+    """Manage miner backend lifecycle and normalized Home Assistant data."""
 
-    miner: "pyasic.AnyMiner" = None
+    miner: "pyasic.AnyMiner | None"
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize MinerCoordinator object."""
+        """Initialize MinerCoordinator."""
         self.miner = None
+        self.backend: PyasicBackend | None = None
         self._failure_count = 0
         super().__init__(
             hass=hass,
@@ -73,170 +78,139 @@ class MinerCoordinator(DataUpdateCoordinator):
         )
 
     @property
-    def available(self):
-        """Return if device is available or not."""
-        return self.miner is not None
+    def available(self) -> bool:
+        """Return whether the miner has a backend and the last update succeeded."""
+        return self.backend is not None and self.last_update_success
 
     async def get_miner(self):
-        """Get a valid Miner instance."""
-        import pyasic  # lazy import to avoid blocking event loop
+        """Return the persistent pyasic miner used by the compatibility backend."""
+        if self.miner is not None:
+            return self.miner
+
+        import pyasic
 
         miner_ip = self.config_entry.data[CONF_IP]
         miner = await pyasic.get_miner(miner_ip)
         if miner is None:
             return None
 
+        if miner.api is not None and miner.api.pwd is not None:
+            miner.api.pwd = self.config_entry.data.get(CONF_RPC_PASSWORD, "")
+
+        if miner.web is not None:
+            miner.web.username = self.config_entry.data.get(CONF_WEB_USERNAME, "")
+            miner.web.pwd = self.config_entry.data.get(CONF_WEB_PASSWORD, "")
+
+        if miner.ssh is not None:
+            miner.ssh.username = self.config_entry.data.get(CONF_SSH_USERNAME, "")
+            miner.ssh.pwd = self.config_entry.data.get(CONF_SSH_PASSWORD, "")
+
         self.miner = miner
-        if self.miner.api is not None:
-            if self.miner.api.pwd is not None:
-                self.miner.api.pwd = self.config_entry.data.get(CONF_RPC_PASSWORD, "")
+        self.backend = PyasicBackend(
+            miner,
+            minimum_power=self.config_entry.data.get(CONF_MIN_POWER, 15),
+            maximum_power=self.config_entry.data.get(CONF_MAX_POWER, 10000),
+        )
+        _LOGGER.debug(
+            "%s: created persistent %s backend for %s",
+            self.config_entry.title,
+            self.backend.kind.value,
+            miner_ip,
+        )
+        return miner
 
-        if self.miner.web is not None:
-            self.miner.web.username = self.config_entry.data.get(CONF_WEB_USERNAME, "")
-            self.miner.web.pwd = self.config_entry.data.get(CONF_WEB_PASSWORD, "")
-
-        if self.miner.ssh is not None:
-            self.miner.ssh.username = self.config_entry.data.get(CONF_SSH_USERNAME, "")
-            self.miner.ssh.pwd = self.config_entry.data.get(CONF_SSH_PASSWORD, "")
-        return self.miner
-
-    async def _async_update_data(self):
-        """Fetch sensors from miners."""
-        import pyasic  # lazy import to avoid blocking event loop
-
-        miner = await self.get_miner()
-
-        if miner is None:
-            self._failure_count += 1
-
-            if self._failure_count == 1:
-                _LOGGER.warning(
-                    "Miner is offline – returning zeroed data (first failure)."
-                )
-                return {
-                    **DEFAULT_DATA,
-                    "power_limit_range": {
-                        "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
-                        "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
-                    },
-                }
-
-            raise UpdateFailed("Miner Offline (consecutive failure)")
-
-        # At this point, miner is valid
-        _LOGGER.debug(f"Found miner: {self.miner}")
-
-        # Base data options to fetch
-        data_options = [
-            pyasic.DataOptions.HOSTNAME,
-            pyasic.DataOptions.MAC,
-            pyasic.DataOptions.IS_MINING,
-            pyasic.DataOptions.FW_VERSION,
-            pyasic.DataOptions.HASHRATE,
-            pyasic.DataOptions.EXPECTED_HASHRATE,
-            pyasic.DataOptions.HASHBOARDS,
-            pyasic.DataOptions.WATTAGE,
-            pyasic.DataOptions.WATTAGE_LIMIT,
-            pyasic.DataOptions.FANS,
-            pyasic.DataOptions.CONFIG,
-        ]
-
-        try:
-            miner_data = await self.miner.get_data(include=data_options)
-        except Exception as err:
-            # VNish firmware has a bug with CONFIG - retry without it
-            if "config" in str(err).lower():
-                _LOGGER.warning(
-                    f"Config fetch failed for {self.miner}, retrying without CONFIG: {err}"
-                )
-                data_options.remove(pyasic.DataOptions.CONFIG)
-                try:
-                    miner_data = await self.miner.get_data(include=data_options)
-                except Exception as retry_err:
-                    self._failure_count += 1
-                    if self._failure_count == 1:
-                        _LOGGER.warning(
-                            f"Error fetching miner data: {retry_err} – returning zeroed data (first failure)."
-                        )
-                        return {
-                            **DEFAULT_DATA,
-                            "power_limit_range": {
-                                "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
-                                "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
-                            },
-                        }
-                    _LOGGER.exception(retry_err)
-                    raise UpdateFailed from retry_err
-            else:
-                self._failure_count += 1
-
-                if self._failure_count == 1:
-                    _LOGGER.warning(
-                        f"Error fetching miner data: {err} – returning zeroed data (first failure)."
-                    )
-                    return {
-                        **DEFAULT_DATA,
-                        "power_limit_range": {
-                            "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
-                            "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
-                        },
-                    }
-
-                _LOGGER.exception(err)
-                raise UpdateFailed from err
-
-        _LOGGER.debug(f"Got data: {miner_data}")
-
-        # Success: reset the failure count
-        self._failure_count = 0
-
-        try:
-            hashrate = round(float(miner_data.hashrate), 2)
-        except TypeError:
-            hashrate = None
-
-        try:
-            expected_hashrate = round(float(miner_data.expected_hashrate), 2)
-        except TypeError:
-            expected_hashrate = None
-
-        try:
-            active_preset = miner_data.config.mining_mode.active_preset.name
-        except AttributeError:
-            active_preset = None
-
-        data = {
-            "hostname": miner_data.hostname,
-            "mac": miner_data.mac,
-            "make": miner_data.make,
-            "model": miner_data.model,
-            "ip": self.miner.ip,
-            "is_mining": miner_data.is_mining,
-            "fw_ver": miner_data.fw_ver,
-            "miner_sensors": {
-                "hashrate": hashrate,
-                "ideal_hashrate": expected_hashrate,
-                "active_preset_name": active_preset,
-                "temperature": miner_data.temperature_avg,
-                "power_limit": miner_data.wattage_limit,
-                "miner_consumption": miner_data.wattage,
-                "efficiency": miner_data.efficiency_fract,
-            },
-            "board_sensors": {
-                board.slot: {
-                    "board_temperature": board.temp,
-                    "chip_temperature": board.chip_temp,
-                    "board_hashrate": round(float(board.hashrate or 0), 2),
-                }
-                for board in miner_data.hashboards
-            },
-            "fan_sensors": {
-                idx: {"fan_speed": fan.speed} for idx, fan in enumerate(miner_data.fans)
-            },
-            "config": miner_data.config,
+    def _offline_data(self) -> dict:
+        """Return zeroed first-failure data while preserving configured range."""
+        return {
+            **DEFAULT_DATA,
+            "ip": self.config_entry.data.get(CONF_IP),
             "power_limit_range": {
                 "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
                 "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
+                "step": 100,
             },
         }
-        return data
+
+    async def _async_update_data(self):
+        """Fetch and normalize miner data through a persistent backend."""
+        if self.backend is None:
+            miner = await self.get_miner()
+            if miner is None:
+                self._failure_count += 1
+                if self._failure_count == 1:
+                    _LOGGER.warning(
+                        "%s: miner is offline; returning zeroed data for first failure",
+                        self.config_entry.title,
+                    )
+                    return self._offline_data()
+                raise UpdateFailed("Miner offline")
+
+        try:
+            snapshot = await self.backend.async_refresh()
+        except Exception as err:
+            self._failure_count += 1
+            if self._failure_count == 1:
+                _LOGGER.warning(
+                    "%s: error fetching miner data; returning zeroed data for first "
+                    "failure: %s",
+                    self.config_entry.title,
+                    err,
+                )
+                return self._offline_data()
+            _LOGGER.exception("%s: miner update failed", self.config_entry.title)
+            raise UpdateFailed from err
+
+        self._failure_count = 0
+        capabilities = self.backend.capabilities
+        power_range = capabilities.power_limit_range
+
+        return {
+            "hostname": snapshot.hostname,
+            "mac": snapshot.mac,
+            "make": snapshot.manufacturer,
+            "model": snapshot.model,
+            "ip": snapshot.host,
+            "is_mining": snapshot.is_mining,
+            "fw_ver": snapshot.firmware,
+            "backend": snapshot.backend.value,
+            "capabilities": {
+                "power_limit": capabilities.power_limit,
+                "pause_resume": capabilities.pause_resume,
+                "reboot": capabilities.reboot,
+                "restart_backend": capabilities.restart_backend,
+                "power_modes": capabilities.power_modes,
+                "fans": capabilities.fans,
+                "hashboards": capabilities.hashboards,
+                "diagnostics": capabilities.diagnostics,
+            },
+            "miner_sensors": {
+                "hashrate": snapshot.hashrate,
+                "ideal_hashrate": snapshot.ideal_hashrate,
+                "active_preset_name": snapshot.active_preset_name,
+                "temperature": snapshot.temperature,
+                "power_limit": snapshot.power_limit,
+                "miner_consumption": snapshot.consumption,
+                "efficiency": snapshot.efficiency,
+            },
+            "board_sensors": {
+                board.slot: {
+                    "board_temperature": board.temperature,
+                    "chip_temperature": board.chip_temperature,
+                    "board_hashrate": board.hashrate,
+                }
+                for board in snapshot.hashboards
+            },
+            "fan_sensors": {
+                fan.index: {"fan_speed": fan.speed} for fan in snapshot.fans
+            },
+            "config": snapshot.raw_config,
+            "power_limit_range": {
+                "min": power_range.minimum
+                if power_range
+                else self.config_entry.data.get(CONF_MIN_POWER, 15),
+                "max": power_range.maximum
+                if power_range
+                else self.config_entry.data.get(CONF_MAX_POWER, 10000),
+                "step": power_range.step if power_range else 100,
+            },
+        }
