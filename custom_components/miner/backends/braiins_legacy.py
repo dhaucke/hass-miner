@@ -120,6 +120,47 @@ def _shell_single_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
+def _average_board_temperature(rpc_temps: object) -> float | None:
+    """Return the average S9 board temperature from BOSMiner's legacy temps RPC."""
+    if not isinstance(rpc_temps, dict):
+        return None
+    rows = rpc_temps.get("TEMPS")
+    if not isinstance(rows, list):
+        return None
+
+    values = [
+        float(row["Board"])
+        for row in rows
+        if isinstance(row, dict) and isinstance(row.get("Board"), (int, float))
+    ]
+    if not values:
+        return None
+    return round(sum(values) / len(values), 2)
+
+
+def _work_solver_board_temperature(raw_work_solvers: str) -> float | None:
+    """Extract aggregate board temperature from BOSminer API JSON."""
+    try:
+        payload = json.loads(raw_work_solvers)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    temperatures = payload.get("temperatures")
+    if not isinstance(temperatures, list):
+        return None
+    for temperature in temperatures:
+        if not isinstance(temperature, dict):
+            continue
+        if temperature.get("location") != "Board":
+            continue
+        value = temperature.get("degrees_c")
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+
 class BraiinsLegacyS9Backend(PyasicBackend):
     """Legacy BraiinsOS+ backend for positively identified Antminer S9 units."""
 
@@ -173,20 +214,52 @@ class BraiinsLegacyS9Backend(PyasicBackend):
 
         self._identity_validated = True
 
+    async def _read_s9_temperature(self) -> float | None:
+        """Read board temperature without relying on pyasic model detection."""
+        rpc = getattr(self.miner, "rpc", None)
+        if rpc is not None and hasattr(rpc, "temps"):
+            try:
+                temperature = _average_board_temperature(await rpc.temps())
+            except Exception:
+                temperature = None
+            if temperature is not None:
+                return temperature
+
+        ssh = getattr(self.miner, "ssh", None)
+        if ssh is None:
+            return None
+        try:
+            raw = await ssh.send_command("bosminer api work-solvers --stats Full")
+        except Exception:
+            return None
+        return _work_solver_board_temperature(raw)
+
     async def async_refresh(self):
         """Refresh telemetry and expose independently validated S9 identity."""
         snapshot = await super().async_refresh()
         if not self._identity_validated:
             await self.async_validate_identity()
 
+        temperature = snapshot.temperature
+        if temperature is None:
+            temperature = await self._read_s9_temperature()
+
+        active_profile = snapshot.active_preset_name
+        if active_profile is None and snapshot.power_limit is not None:
+            active_profile = "Power Target"
+
         # pyasic 0.78.8 may report empty make/model for this legacy BOS+ build.
         # Once the two independent firmware identity checks have passed, use
-        # that stronger evidence for Home Assistant device metadata.
+        # that stronger evidence for Home Assistant device metadata. The same
+        # build can also omit topology-derived temperature and preset metadata,
+        # so fill those from verified read-only BOSMiner telemetry.
         snapshot = replace(
             snapshot,
             manufacturer=S9_MANUFACTURER,
             model=S9_MODEL,
             backend=self.kind,
+            temperature=temperature,
+            active_preset_name=active_profile,
         )
         self._last_snapshot = snapshot
         return snapshot
