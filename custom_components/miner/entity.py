@@ -12,6 +12,8 @@ from .coordinator import MinerCoordinator
 class MinerEntity(CoordinatorEntity[MinerCoordinator]):
     """Base entity with shared device metadata."""
 
+    _attr_has_entity_name = True
+
     @property
     def device_info(self) -> DeviceInfo:
         """Return normalized device metadata for the miner."""
