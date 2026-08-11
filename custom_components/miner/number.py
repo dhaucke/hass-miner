@@ -20,7 +20,8 @@ _LOGGER = logging.getLogger(__name__)
 
 NUMBER_DESCRIPTION_KEY_MAP: dict[str, NumberEntityDescription] = {
     "power_limit": NumberEntityDescription(
-        key="Power Limit",
+        key="power_limit",
+        translation_key="power_limit",
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=NumberDeviceClass.POWER,
         entity_category=EntityCategory.CONFIG,
@@ -57,18 +58,9 @@ class MinerPowerLimitNumber(MinerEntity, NumberEntity):
         """Initialize the power-limit entity."""
         super().__init__(coordinator=coordinator)
         self.entity_description = entity_description
-        self._attr_native_value = self.coordinator.data["miner_sensors"]["power_limit"]
-
-    @property
-    def name(self) -> str | None:
-        """Return the entity name."""
-        return f"{self.coordinator.config_entry.title} Power Limit"
-
-    @property
-    def unique_id(self) -> str | None:
-        """Return the stable entity UUID."""
         identity = self.coordinator.data.get("mac") or self.coordinator.data.get("ip")
-        return f"{identity}-power_limit" if identity else None
+        self._attr_unique_id = f"{identity}-power_limit" if identity else None
+        self._attr_native_value = self.coordinator.data["miner_sensors"]["power_limit"]
 
     @property
     def native_min_value(self) -> float | None:
