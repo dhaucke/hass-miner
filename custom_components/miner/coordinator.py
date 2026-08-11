@@ -36,7 +36,7 @@ RECONNECT_AFTER_FAILURES = 3
 class MinerCoordinator(DataUpdateCoordinator):
     """Manage miner backend lifecycle and normalized Home Assistant data."""
 
-    miner: "pyasic.AnyMiner | None"
+    miner: pyasic.AnyMiner | None
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize MinerCoordinator."""
