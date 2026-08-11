@@ -256,7 +256,7 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         )
         self._identity_validated = False
         self._board_cache: dict[int, HashboardData] = {}
-        self._board_misses: dict[int, int] = {}
+        self._board_field_misses: dict[tuple[int, str], int] = {}
         self._fan_cache: dict[int, FanData] = {}
         self._fan_misses: dict[int, int] = {}
 
@@ -318,51 +318,53 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         except Exception:
             return ()
 
+    def _stabilize_board_field(
+        self,
+        slot: int,
+        field: str,
+        current: float | None,
+        cached: float | None,
+    ) -> float | None:
+        """Stabilize one board field without hiding fresh values in other fields."""
+        key = (slot, field)
+        if current is not None:
+            self._board_field_misses[key] = 0
+            return current
+
+        misses = self._board_field_misses.get(key, 0) + 1
+        self._board_field_misses[key] = misses
+        if cached is not None and misses < S9_TELEMETRY_MISS_LIMIT:
+            return cached
+        return None
+
     def _stabilize_hashboards(
         self, boards: tuple[HashboardData, ...]
     ) -> tuple[HashboardData, ...]:
-        """Keep the last valid board telemetry across short BOSer dropouts."""
+        """Keep each missing board field briefly without freezing fresh telemetry."""
         current = {board.slot: board for board in boards}
         slots = sorted(current.keys() | self._board_cache.keys())
         stabilized: list[HashboardData] = []
 
         for slot in slots:
-            board = current.get(slot)
-            cached = self._board_cache.get(slot)
-            if board is not None and (
-                board.temperature is not None
-                or board.chip_temperature is not None
-                or board.hashrate is not None
-            ):
-                merged = HashboardData(
-                    slot=slot,
-                    temperature=(
-                        board.temperature
-                        if board.temperature is not None
-                        else cached.temperature if cached is not None else None
-                    ),
-                    chip_temperature=(
-                        board.chip_temperature
-                        if board.chip_temperature is not None
-                        else cached.chip_temperature if cached is not None else None
-                    ),
-                    hashrate=(
-                        board.hashrate
-                        if board.hashrate is not None
-                        else cached.hashrate if cached is not None else None
-                    ),
-                )
-                self._board_cache[slot] = merged
-                self._board_misses[slot] = 0
-                stabilized.append(merged)
-                continue
-
-            misses = self._board_misses.get(slot, 0) + 1
-            self._board_misses[slot] = misses
-            if cached is not None and misses < S9_TELEMETRY_MISS_LIMIT:
-                stabilized.append(cached)
-            else:
-                stabilized.append(HashboardData(slot=slot))
+            board = current.get(slot) or HashboardData(slot=slot)
+            cached = self._board_cache.get(slot) or HashboardData(slot=slot)
+            merged = HashboardData(
+                slot=slot,
+                temperature=self._stabilize_board_field(
+                    slot, "temperature", board.temperature, cached.temperature
+                ),
+                chip_temperature=self._stabilize_board_field(
+                    slot,
+                    "chip_temperature",
+                    board.chip_temperature,
+                    cached.chip_temperature,
+                ),
+                hashrate=self._stabilize_board_field(
+                    slot, "hashrate", board.hashrate, cached.hashrate
+                ),
+            )
+            self._board_cache[slot] = merged
+            stabilized.append(merged)
 
         return tuple(stabilized)
 
