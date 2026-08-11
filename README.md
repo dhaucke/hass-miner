@@ -1,6 +1,8 @@
-<div align="center">
+![Miner - Local ASIC miner monitoring and control for Home Assistant](https://raw.githubusercontent.com/dhaucke/hass-miner/main/assets/miner-banner.png)
 
-<img src="assets/miner-banner.png" alt="Miner - Local ASIC miner monitoring and control for Home Assistant" width="100%">
+# Miner
+
+**Local ASIC miner monitoring and control for Home Assistant.**
 
 [![Release](https://img.shields.io/github/v/release/dhaucke/hass-miner?style=flat-square)](https://github.com/dhaucke/hass-miner/releases/latest)
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5?style=flat-square)](https://github.com/hacs/integration)
@@ -11,17 +13,15 @@
 
 [Install with HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration) · [Supported miners](SUPPORTED_MINERS.md) · [Report an issue](https://github.com/dhaucke/hass-miner/issues)
 
-</div>
-
 ---
 
 ## What is Miner?
 
 **Miner** is a local-first Home Assistant integration for monitoring and controlling ASIC miners. It uses a capability-driven backend architecture so Home Assistant entities stay consistent while firmware-specific behavior can be handled safely where required.
 
-No cloud service is required. Communication happens directly between Home Assistant and the miner on your local network.
+> No cloud service is required. Communication happens directly between Home Assistant and the miner on your local network.
 
-### Highlights
+## Highlights
 
 | Feature | Description |
 | --- | --- |
@@ -31,6 +31,8 @@ No cloud service is required. Communication happens directly between Home Assist
 | **Automation ready** | Native entities and services for PV surplus, storage, load-management and other Home Assistant automations |
 | **Resilient polling** | Offline or unavailable miners fail quickly instead of delaying Home Assistant startup |
 | **Diagnostics** | Home Assistant diagnostics for troubleshooting and bringing up additional hardware |
+
+---
 
 ## Antminer S9 + legacy Braiins OS+
 
@@ -59,6 +61,8 @@ Other miners supported by pyasic use the generic compatibility backend. Detectio
 
 See **[SUPPORTED_MINERS.md](SUPPORTED_MINERS.md)** for the current support levels and hardware notes.
 
+---
+
 ## Installation
 
 ### HACS
@@ -70,29 +74,29 @@ See **[SUPPORTED_MINERS.md](SUPPORTED_MINERS.md)** for the current support level
 5. Go to **Settings → Devices & services → Add integration → Miner**.
 6. Enter the miner IP address or hostname and the credentials requested for that device.
 
-You can also use the button below:
-
 [![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration)
 
-### Manual
+### Manual installation
 
 Copy `custom_components/miner` to your Home Assistant `custom_components` directory and restart Home Assistant.
+
+---
 
 ## Home Assistant entities
 
 Entities are created from detected backend capabilities and reported topology. Miner does not invent hashboards or fans that the miner has never reported.
 
-Typical entities include:
-
-- **Hashrate** and **ideal hashrate**
-- **Power consumption** and **efficiency**
-- **Temperature**
-- Per-hashboard **temperature**, **chip temperature** and **hashrate**
-- **Fan RPM**
-- **Power limit**
-- **Mining** switch
-- **Reboot** button
-- **Restart mining backend** button
+| Entity / capability | Availability |
+| --- | --- |
+| **Hashrate / ideal hashrate** | Where reported by the miner |
+| **Power consumption / efficiency** | Where supported |
+| **Temperature** | Device and per-hashboard where available |
+| **Chip temperature** | Where exposed by the backend |
+| **Fan RPM** | Where reported by the miner |
+| **Power limit** | Supported write-capable backends |
+| **Mining switch** | Where supported |
+| **Reboot** | Where supported |
+| **Restart mining backend** | Backends that expose it |
 
 Not every miner exposes every entity.
 
@@ -102,11 +106,13 @@ Power writes are backend-specific. Model-specific backends may enforce a validat
 
 For the legacy S9, only an existing integer `[autotuning].power_target` is modified. Miner refuses the write when device identity, TOML structure, autotuning state or model metadata do not match the validated S9 path.
 
+---
+
 ## Troubleshooting
 
 If a miner is unsupported or an integration problem is reproducible, open a GitHub issue and attach the Home Assistant diagnostics export when useful.
 
-**Never post passwords, SSH keys, pool credentials, wallet addresses or other secrets.**
+> **Security:** Never post passwords, SSH keys, pool credentials, wallet addresses or other secrets.
 
 ## Development
 
@@ -119,6 +125,8 @@ python3 -m pytest -q
 ```
 
 HACS validation and hassfest run in GitHub Actions.
+
+---
 
 ## Credits & license
 
