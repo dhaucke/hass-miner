@@ -30,6 +30,37 @@ def _enum_or_value(value: object | None) -> str | None:
     return str(raw)
 
 
+def _hashrate_ths(value: object | None) -> float | None:
+    """Normalize a pyasic hashrate object to TH/s.
+
+    pyasic's AlgoHashRateType.__float__ returns the numeric rate in the
+    object's *current* unit.  That is not necessarily TH/s.  Legacy BOSMiner
+    telemetry can therefore expose H/s-sized numbers if callers simply use
+    ``float(value)``.  Convert through the object's unit-aware ``into`` method
+    whenever available and retain numeric compatibility for older/plain values.
+    """
+    if value is None:
+        return None
+
+    into = getattr(value, "into", None)
+    unit = getattr(value, "unit", None)
+    if callable(into) and unit is not None:
+        target_unit = getattr(type(unit), "TH", None)
+        if target_unit is not None:
+            return float(into(target_unit))
+
+    return float(value)
+
+
+def _efficiency_jth(wattage: int | float | None, hashrate_ths: float | None) -> float | None:
+    """Calculate J/TH from normalized TH/s instead of pyasic's raw unit."""
+    if wattage is None or hashrate_ths is None:
+        return None
+    if hashrate_ths == 0:
+        return 0.0
+    return round(float(wattage) / hashrate_ths, 2)
+
+
 class PyasicBackend:
     """Compatibility adapter for miners supported by pyasic."""
 
@@ -114,12 +145,14 @@ class PyasicBackend:
         with suppress(AttributeError):
             active_preset = data.config.mining_mode.active_preset.name
 
+        hashrate_ths = _hashrate_ths(data.hashrate)
+        expected_hashrate_ths = _hashrate_ths(data.expected_hashrate)
         hashboards = tuple(
             HashboardData(
                 slot=int(board.slot),
                 temperature=board.temp,
                 chip_temperature=board.chip_temp,
-                hashrate=float(board.hashrate) if board.hashrate is not None else None,
+                hashrate=_hashrate_ths(board.hashrate),
             )
             for board in (data.hashboards or [])
         )
@@ -137,16 +170,12 @@ class PyasicBackend:
             hostname=data.hostname,
             mac=data.mac,
             is_mining=data.is_mining,
-            hashrate=float(data.hashrate) if data.hashrate is not None else None,
-            ideal_hashrate=(
-                float(data.expected_hashrate)
-                if data.expected_hashrate is not None
-                else None
-            ),
+            hashrate=hashrate_ths,
+            ideal_hashrate=expected_hashrate_ths,
             temperature=data.temperature_avg,
             power_limit=data.wattage_limit,
             consumption=data.wattage,
-            efficiency=data.efficiency_fract,
+            efficiency=_efficiency_jth(data.wattage, hashrate_ths),
             active_preset_name=active_preset,
             hashboards=hashboards,
             fans=fans,
