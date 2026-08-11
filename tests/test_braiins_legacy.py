@@ -4,12 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.miner.backends.base import BackendKind
+from custom_components.miner.backends.base import MinerSnapshot
 from custom_components.miner.backends.base import UnsafeConfigurationError
 from custom_components.miner.backends.braiins_legacy import ACTIVE_CONFIG_PATH
 from custom_components.miner.backends.braiins_legacy import BACKUP_PATH
 from custom_components.miner.backends.braiins_legacy import BraiinsLegacyS9Backend
 from custom_components.miner.backends.braiins_legacy import TEMP_PATH
 from custom_components.miner.backends.braiins_legacy import update_power_target
+from custom_components.miner.backends.pyasic_backend import PyasicBackend
 
 VALID_CONFIG = """[format]
 version = \"2.0\"
@@ -127,6 +130,38 @@ def test_update_power_target_rejects_schema_change() -> None:
 
     with pytest.raises(UnsafeConfigurationError):
         update_power_target(missing, 600)
+
+
+@pytest.mark.asyncio
+async def test_validated_s9_identity_replaces_empty_pyasic_metadata(monkeypatch) -> None:
+    """Independent S9 identity checks should drive Home Assistant device metadata."""
+    miner = SimpleNamespace(
+        supports_autotuning=True,
+        supports_shutdown=False,
+        supports_power_modes=False,
+        expected_fans=0,
+        expected_hashboards=0,
+    )
+    backend = BraiinsLegacyS9Backend(miner)
+    backend._identity_validated = True
+
+    async def generic_refresh(_self) -> MinerSnapshot:
+        return MinerSnapshot(
+            host="192.0.2.10",
+            backend=BackendKind.PYASIC,
+            manufacturer="",
+            model="",
+            firmware="22.08.1",
+        )
+
+    monkeypatch.setattr(PyasicBackend, "async_refresh", generic_refresh)
+
+    snapshot = await backend.async_refresh()
+
+    assert snapshot.backend is BackendKind.BRAIINS_LEGACY
+    assert snapshot.manufacturer == "Bitmain"
+    assert snapshot.model == "Antminer S9"
+    assert snapshot.firmware == "22.08.1"
 
 
 class FakeSSH:
