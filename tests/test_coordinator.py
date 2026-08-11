@@ -1,7 +1,12 @@
 """Coordinator lifecycle regression tests."""
 
+import asyncio
 from types import SimpleNamespace
 
+import pytest
+from homeassistant.helpers.update_coordinator import UpdateFailed
+
+import custom_components.miner.coordinator as coordinator_module
 from custom_components.miner.coordinator import MinerCoordinator
 from custom_components.miner.coordinator import RECONNECT_AFTER_FAILURES
 
@@ -36,3 +41,52 @@ def test_backend_is_rediscovered_after_repeated_failures() -> None:
 
     assert reset_calls == [True]
     assert coordinator._failure_count == RECONNECT_AFTER_FAILURES
+
+
+@pytest.mark.asyncio
+async def test_discovery_timeout_fails_fast(monkeypatch) -> None:
+    """A stalled pyasic discovery must not hold Home Assistant startup indefinitely."""
+    failures: list[bool] = []
+
+    async def stalled_discovery():
+        await asyncio.sleep(1)
+        return None
+
+    fake = SimpleNamespace(
+        backend=None,
+        _failure_count=0,
+        get_miner=stalled_discovery,
+        _record_failure=lambda: failures.append(True),
+    )
+    monkeypatch.setattr(coordinator_module, "DISCOVERY_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(UpdateFailed, match="discovery timed out"):
+        await MinerCoordinator._async_update_data(fake)
+
+    assert failures == [True]
+
+
+@pytest.mark.asyncio
+async def test_refresh_timeout_fails_fast(monkeypatch) -> None:
+    """A stalled miner backend poll must be cancelled before the next poll interval."""
+    failures: list[bool] = []
+
+    class StalledBackend:
+        """Backend that never completes within the test timeout."""
+
+        async def async_refresh(self):
+            """Simulate a BOS/BOSer request that has stopped responding."""
+            await asyncio.sleep(1)
+            return None
+
+    fake = SimpleNamespace(
+        backend=StalledBackend(),
+        _failure_count=0,
+        _record_failure=lambda: failures.append(True),
+    )
+    monkeypatch.setattr(coordinator_module, "REFRESH_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(UpdateFailed, match="refresh timed out"):
+        await MinerCoordinator._async_update_data(fake)
+
+    assert failures == [True]
