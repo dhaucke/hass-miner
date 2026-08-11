@@ -14,6 +14,13 @@ PLATFORMS: list[Platform] = [
 ]
 
 
+async def _async_update_listener(
+    hass: HomeAssistant, config_entry: ConfigEntry
+) -> None:
+    """Reload an entry after advanced options change."""
+    await hass.config_entries.async_reload(config_entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Set up Miner from a config entry."""
     from .coordinator import MinerCoordinator
@@ -27,6 +34,9 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     # the integration must never mutate its Python environment at runtime.
     await coordinator.async_config_entry_first_refresh()
 
+    config_entry.async_on_unload(
+        config_entry.add_update_listener(_async_update_listener)
+    )
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
     await async_setup_services(hass)
     return True
