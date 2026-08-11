@@ -6,6 +6,7 @@ miner object on every refresh.
 """
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from .base import BackendKind
@@ -36,7 +37,7 @@ class PyasicBackend:
 
     def __init__(
         self,
-        miner: "pyasic.AnyMiner",
+        miner: pyasic.AnyMiner,
         *,
         minimum_power: int = 15,
         maximum_power: int = 10000,
@@ -110,10 +111,8 @@ class PyasicBackend:
             data = await self.miner.get_data(include=options)
 
         active_preset = None
-        try:
+        with suppress(AttributeError):
             active_preset = data.config.mining_mode.active_preset.name
-        except AttributeError:
-            pass
 
         hashboards = tuple(
             HashboardData(
