@@ -84,16 +84,16 @@ def test_update_power_target_accepts_verified_22081_schema_without_mode() -> Non
     assert updated.replace("power_target = 1400", "power_target = 1200") == BRAIINS_22081_CONFIG
 
 
-@pytest.mark.parametrize("value", [399, 1500, 450])
+@pytest.mark.parametrize("value", [399, 1500])
 def test_update_power_target_rejects_unsafe_range(value: int) -> None:
-    """S9-specific range and step must be enforced before a write."""
+    """S9-specific safe bounds must be enforced before a write."""
     with pytest.raises(ValueError):
         update_power_target(VALID_CONFIG, value)
 
 
-def test_update_power_target_accepts_full_verified_range() -> None:
-    """Allow 400-1400 W in 100 W steps for the validated S9 backend."""
-    for value in range(400, 1401, 100):
+def test_update_power_target_accepts_arbitrary_watts_in_verified_range() -> None:
+    """Allow any integer watt target from 400 through 1400 W."""
+    for value in (400, 450, 999, 1200, 1234, 1400):
         updated = update_power_target(VALID_CONFIG, value)
         assert f"power_target = {value}" in updated
 
