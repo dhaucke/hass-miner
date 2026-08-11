@@ -12,6 +12,7 @@ import asyncio
 import json
 import re
 import tomllib
+from dataclasses import replace
 
 from .base import BackendKind
 from .base import MinerCapabilities
@@ -21,6 +22,7 @@ from .pyasic_backend import PyasicBackend
 
 S9_BOARD_NAME = "am1-s9"
 S9_MODEL = "Antminer S9"
+S9_MANUFACTURER = "Bitmain"
 S9_POWER_RANGE = PowerLimitRange(minimum=400, maximum=1400, step=100)
 
 BACKUP_PATH = "/etc/bosminer.toml.hass-miner.bak"
@@ -172,10 +174,21 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         self._identity_validated = True
 
     async def async_refresh(self):
-        """Refresh telemetry and validate S9 identity before write controls appear."""
+        """Refresh telemetry and expose independently validated S9 identity."""
         snapshot = await super().async_refresh()
         if not self._identity_validated:
             await self.async_validate_identity()
+
+        # pyasic 0.78.8 may report empty make/model for this legacy BOS+ build.
+        # Once the two independent firmware identity checks have passed, use
+        # that stronger evidence for Home Assistant device metadata.
+        snapshot = replace(
+            snapshot,
+            manufacturer=S9_MANUFACTURER,
+            model=S9_MODEL,
+            backend=self.kind,
+        )
+        self._last_snapshot = snapshot
         return snapshot
 
     async def _restart_bosminer(self) -> None:
