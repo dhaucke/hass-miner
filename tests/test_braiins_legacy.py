@@ -1,8 +1,12 @@
 """Regression tests for the legacy Braiins S9 backend."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from custom_components.miner.backends.base import UnsafeConfigurationError
+from custom_components.miner.backends.braiins_legacy import BACKUP_PATH
+from custom_components.miner.backends.braiins_legacy import BraiinsLegacyS9Backend
 from custom_components.miner.backends.braiins_legacy import update_power_target
 
 VALID_CONFIG = """[format]
@@ -70,3 +74,59 @@ def test_update_power_target_rejects_schema_change() -> None:
 
     with pytest.raises(UnsafeConfigurationError):
         update_power_target(missing, 600)
+
+
+class FakeSSH:
+    """Minimal in-memory legacy SSH transport for write-path tests."""
+
+    def __init__(self) -> None:
+        self.current = VALID_CONFIG
+        self.backup = ""
+        self.restart_calls = 0
+
+    async def get_config_file(self) -> str:
+        return self.current
+
+    async def send_command(self, command: str) -> str:
+        if command == f"cp /etc/bosminer.toml {BACKUP_PATH}":
+            self.backup = self.current
+        elif command == f"cat {BACKUP_PATH}":
+            return self.backup
+        elif command == f"cp {BACKUP_PATH} /etc/bosminer.toml":
+            self.current = self.backup
+        elif "hass-miner.tmp" in command and "power_target = 600" in command:
+            self.current = update_power_target(self.current, 600)
+        return ""
+
+    async def restart_bosminer(self):
+        self.restart_calls += 1
+        # Simulate the new config failing to restart. Rollback restart succeeds.
+        return None if self.restart_calls == 1 else "restarted"
+
+
+@pytest.mark.asyncio
+async def test_power_write_rolls_back_when_restart_fails(monkeypatch) -> None:
+    """A failed BOSMiner restart must restore the validated original config."""
+    ssh = FakeSSH()
+    miner = SimpleNamespace(
+        ssh=ssh,
+        supports_autotuning=True,
+        supports_shutdown=False,
+        supports_power_modes=False,
+        expected_fans=0,
+        expected_hashboards=0,
+    )
+    backend = BraiinsLegacyS9Backend(miner)
+    backend._identity_validated = True
+
+    async def recovered_immediately(*, attempts=12, delay=2.0) -> None:
+        return None
+
+    monkeypatch.setattr(backend, "_wait_for_bosminer", recovered_immediately)
+
+    with pytest.raises(RuntimeError):
+        await backend.async_set_power_limit(600)
+
+    assert ssh.current == VALID_CONFIG
+    assert ssh.backup == VALID_CONFIG
+    assert ssh.restart_calls == 2
