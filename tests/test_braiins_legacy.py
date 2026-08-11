@@ -80,14 +80,17 @@ class FakeSSH:
     """Minimal in-memory legacy SSH transport for write-path tests."""
 
     def __init__(self) -> None:
+        """Initialize an in-memory config and restart counter."""
         self.current = VALID_CONFIG
         self.backup = ""
         self.restart_calls = 0
 
     async def get_config_file(self) -> str:
+        """Return the simulated active BOSMiner configuration."""
         return self.current
 
     async def send_command(self, command: str) -> str:
+        """Handle the subset of SSH commands used by the write-path test."""
         if command == f"cp /etc/bosminer.toml {BACKUP_PATH}":
             self.backup = self.current
         elif command == f"cat {BACKUP_PATH}":
@@ -99,8 +102,8 @@ class FakeSSH:
         return ""
 
     async def restart_bosminer(self):
+        """Fail the first restart and succeed after rollback."""
         self.restart_calls += 1
-        # Simulate the new config failing to restart. Rollback restart succeeds.
         return None if self.restart_calls == 1 else "restarted"
 
 
@@ -124,7 +127,7 @@ async def test_power_write_rolls_back_when_restart_fails(monkeypatch) -> None:
 
     monkeypatch.setattr(backend, "_wait_for_bosminer", recovered_immediately)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(TypeError):
         await backend.async_set_power_limit(600)
 
     assert ssh.current == VALID_CONFIG
