@@ -65,13 +65,13 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._miner = None
         self._suggested_title = "Miner"
 
-    def _abort_if_host_configured(self, host: str) -> None:
-        """Prevent duplicate entries for the same configured host."""
+    def _host_is_configured(self, host: str) -> bool:
+        """Return whether the same host already has a config entry."""
         normalized = host.strip().lower()
-        for entry in self._async_current_entries():
-            configured = str(entry.data.get(CONF_IP, "")).strip().lower()
-            if configured == normalized:
-                raise config_entries.AbortFlow("already_configured")
+        return any(
+            str(entry.data.get(CONF_IP, "")).strip().lower() == normalized
+            for entry in self._async_current_entries()
+        )
 
     async def async_step_user(self, user_input=None):
         """Ask only for the miner address and detect the device."""
@@ -91,7 +91,8 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="user", data_schema=schema)
 
         host = str(user_input[CONF_IP]).strip()
-        self._abort_if_host_configured(host)
+        if self._host_is_configured(host):
+            return self.async_abort(reason="already_configured")
 
         try:
             miner = await _async_discover_miner(host)
@@ -119,7 +120,7 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None:
             user_input = {}
 
-        schema_data: dict[vol.Marker, object] = {}
+        schema_data = {}
 
         rpc = getattr(self._miner, "rpc", None)
         if rpc is not None and getattr(rpc, "pwd", None) is not None:
@@ -184,10 +185,11 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self._validate_credentials()
         except Exception as err:
             _LOGGER.debug("Credential validation failed: %s", err)
+            error_key = "invalid_auth" if _looks_like_auth_error(err) else "cannot_connect"
             return self.async_show_form(
                 step_id="login",
                 data_schema=schema,
-                errors={"base": "invalid_auth" if _looks_like_auth_error(err) else "cannot_connect"},
+                errors={"base": error_key},
                 description_placeholders=self._device_placeholders(),
             )
 
@@ -206,7 +208,9 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         ssh = getattr(self._miner, "ssh", None)
         if ssh is not None:
-            ssh.username = self._data.get(CONF_SSH_USERNAME, getattr(ssh, "username", "root"))
+            ssh.username = self._data.get(
+                CONF_SSH_USERNAME, getattr(ssh, "username", "root")
+            )
             ssh.pwd = self._data.get(CONF_SSH_PASSWORD, "")
 
     async def _validate_credentials(self) -> None:
@@ -215,9 +219,8 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if title:
             self._suggested_title = str(title)
 
-        # For miners exposing SSH, validate the SSH credential separately.
-        # This matters for backends such as legacy Braiins where telemetry may
-        # work without SSH while safe power-limit control requires it.
+        # Legacy Braiins telemetry can work without SSH while safe writes need
+        # it, so explicitly test SSH when the user supplied an SSH username.
         ssh = getattr(self._miner, "ssh", None)
         if ssh is not None and self._data.get(CONF_SSH_USERNAME):
             await ssh.send_command("true")
@@ -279,8 +282,11 @@ class MinerOptionsFlow(config_entries.OptionsFlow):
     """Advanced options kept out of the normal onboarding flow."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
+        """Initialize options flow.
+
+        Home Assistant binds ``self.config_entry`` before using the flow. The
+        argument is intentionally accepted for the standard OptionsFlow API.
+        """
 
     async def async_step_init(self, user_input=None):
         """Manage advanced generic power-range overrides."""
