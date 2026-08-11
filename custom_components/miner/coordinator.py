@@ -1,6 +1,7 @@
 """Miner DataUpdateCoordinator."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
@@ -31,6 +32,8 @@ REQUEST_REFRESH_DEFAULT_COOLDOWN = 5
 DEFAULT_MIN_POWER = 15
 DEFAULT_MAX_POWER = 10000
 RECONNECT_AFTER_FAILURES = 3
+DISCOVERY_TIMEOUT_SECONDS = 5.0
+REFRESH_TIMEOUT_SECONDS = 6.0
 
 
 class MinerCoordinator(DataUpdateCoordinator):
@@ -138,11 +141,23 @@ class MinerCoordinator(DataUpdateCoordinator):
         """Fetch and normalize miner data through a persistent backend."""
         try:
             if self.backend is None:
-                miner = await self.get_miner()
+                try:
+                    async with asyncio.timeout(DISCOVERY_TIMEOUT_SECONDS):
+                        miner = await self.get_miner()
+                except TimeoutError as err:
+                    raise UpdateFailed(
+                        f"Miner discovery timed out after {DISCOVERY_TIMEOUT_SECONDS:g}s"
+                    ) from err
                 if miner is None or self.backend is None:
                     raise UpdateFailed("Miner offline")
 
-            snapshot = await self.backend.async_refresh()
+            try:
+                async with asyncio.timeout(REFRESH_TIMEOUT_SECONDS):
+                    snapshot = await self.backend.async_refresh()
+            except TimeoutError as err:
+                raise UpdateFailed(
+                    f"Miner refresh timed out after {REFRESH_TIMEOUT_SECONDS:g}s"
+                ) from err
         except UpdateFailed:
             self._record_failure()
             raise
