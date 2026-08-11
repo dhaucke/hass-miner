@@ -30,30 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 REQUEST_REFRESH_DEFAULT_COOLDOWN = 5
 DEFAULT_MIN_POWER = 15
 DEFAULT_MAX_POWER = 10000
-
-DEFAULT_DATA = {
-    "hostname": None,
-    "mac": None,
-    "make": None,
-    "model": None,
-    "ip": None,
-    "is_mining": False,
-    "fw_ver": None,
-    "backend": None,
-    "capabilities": {},
-    "miner_sensors": {
-        "hashrate": 0,
-        "ideal_hashrate": 0,
-        "active_preset_name": None,
-        "temperature": 0,
-        "power_limit": 0,
-        "miner_consumption": 0,
-        "efficiency": 0.0,
-    },
-    "board_sensors": {},
-    "fan_sensors": {},
-    "config": None,
-}
+RECONNECT_AFTER_FAILURES = 3
 
 
 class MinerCoordinator(DataUpdateCoordinator):
@@ -102,6 +79,23 @@ class MinerCoordinator(DataUpdateCoordinator):
         """Return generic maximum power override."""
         return int(self._option(CONF_MAX_POWER, DEFAULT_MAX_POWER))
 
+    def _reset_runtime_backend(self) -> None:
+        """Discard stale runtime objects so the next update rediscovers the miner."""
+        if self.backend is not None or self.miner is not None:
+            _LOGGER.info(
+                "%s: discarding stale miner backend after %s consecutive failures",
+                self.config_entry.title,
+                self._failure_count,
+            )
+        self.backend = None
+        self.miner = None
+
+    def _record_failure(self) -> None:
+        """Track failures and force a clean rediscovery after repeated errors."""
+        self._failure_count += 1
+        if self._failure_count >= RECONNECT_AFTER_FAILURES:
+            self._reset_runtime_backend()
+
     async def get_miner(self):
         """Return the persistent pyasic miner used for discovery/compatibility."""
         if self.miner is not None:
@@ -125,60 +119,44 @@ class MinerCoordinator(DataUpdateCoordinator):
             miner.ssh.username = self.config_entry.data.get(CONF_SSH_USERNAME, "")
             miner.ssh.pwd = self.config_entry.data.get(CONF_SSH_PASSWORD, "")
 
-        self.miner = miner
-        self.backend = await async_create_backend(
+        backend = await async_create_backend(
             miner,
             minimum_power=self.configured_min_power,
             maximum_power=self.configured_max_power,
         )
+        self.miner = miner
+        self.backend = backend
         _LOGGER.info(
             "%s: selected %s backend for %s",
             self.config_entry.title,
-            self.backend.kind.value,
+            backend.kind.value,
             miner_ip,
         )
         return miner
 
-    def _offline_data(self) -> dict:
-        """Return zeroed first-failure data while preserving configured range."""
-        return {
-            **DEFAULT_DATA,
-            "ip": self.config_entry.data.get(CONF_IP),
-            "power_limit_range": {
-                "min": self.configured_min_power,
-                "max": self.configured_max_power,
-                "step": 100,
-            },
-        }
-
     async def _async_update_data(self):
         """Fetch and normalize miner data through a persistent backend."""
-        if self.backend is None:
-            miner = await self.get_miner()
-            if miner is None:
-                self._failure_count += 1
-                if self._failure_count == 1:
-                    _LOGGER.warning(
-                        "%s: miner is offline; returning zeroed data for first failure",
-                        self.config_entry.title,
-                    )
-                    return self._offline_data()
-                raise UpdateFailed("Miner offline")
-
         try:
+            if self.backend is None:
+                miner = await self.get_miner()
+                if miner is None or self.backend is None:
+                    raise UpdateFailed("Miner offline")
+
             snapshot = await self.backend.async_refresh()
+        except UpdateFailed:
+            self._record_failure()
+            raise
         except Exception as err:
-            self._failure_count += 1
-            if self._failure_count == 1:
-                _LOGGER.warning(
-                    "%s: error fetching miner data; returning zeroed data for first "
-                    "failure: %s",
-                    self.config_entry.title,
-                    err,
-                )
-                return self._offline_data()
-            _LOGGER.exception("%s: miner update failed", self.config_entry.title)
-            raise UpdateFailed from err
+            self._record_failure()
+            _LOGGER.debug(
+                "%s: miner update failed (%s/%s): %s",
+                self.config_entry.title,
+                self._failure_count,
+                RECONNECT_AFTER_FAILURES,
+                err,
+                exc_info=True,
+            )
+            raise UpdateFailed(f"Miner update failed: {err}") from err
 
         self._failure_count = 0
         capabilities = self.backend.capabilities
