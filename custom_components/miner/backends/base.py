@@ -142,5 +142,8 @@ class MinerBackend(Protocol):
     async def async_restart_backend(self) -> None:
         """Restart the firmware mining backend."""
 
+    async def async_set_power_mode(self, mode: str) -> None:
+        """Set a firmware-defined power mode such as low/normal/high."""
+
     async def async_diagnostics(self) -> dict[str, object]:
         """Return sanitized backend diagnostics."""
