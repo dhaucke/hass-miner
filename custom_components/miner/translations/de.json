@@ -51,6 +51,27 @@
       "invalid_power_range": "Die minimale Leistung muss kleiner als die maximale Leistung sein."
     }
   },
+  "entity": {
+    "sensor": {
+      "temperature": {"name": "Temperatur"},
+      "board_temperature": {"name": "Board {board} Temperatur"},
+      "chip_temperature": {"name": "Board {board} Chip-Temperatur"},
+      "hashrate": {"name": "Hashrate"},
+      "ideal_hashrate": {"name": "Ideale Hashrate"},
+      "active_preset_name": {"name": "Aktives Profil"},
+      "board_hashrate": {"name": "Board {board} Hashrate"},
+      "power_limit": {"name": "Leistungslimit"},
+      "miner_consumption": {"name": "Leistungsaufnahme"},
+      "efficiency": {"name": "Effizienz"},
+      "fan_speed": {"name": "Lüfter {fan} Drehzahl"}
+    },
+    "number": {
+      "power_limit": {"name": "Leistungslimit"}
+    },
+    "switch": {
+      "active": {"name": "Mining"}
+    }
+  },
   "services": {
     "reboot": {
       "name": "Miner neu starten",
