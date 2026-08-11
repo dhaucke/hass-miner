@@ -12,62 +12,35 @@ This fork is being reworked as a Home Assistant integration with explicit miner 
 6. Hardware support is labelled honestly: tested, community-tested, experimental, or generic compatibility.
 7. Advanced options should not be required during normal onboarding.
 
-## Current technical debt
+## Current architecture status
 
-### Dependency/runtime handling
+The rework now has a firmware-independent `MinerBackend` contract, a normalized immutable snapshot model, one persistent pyasic compatibility backend per config entry, and a dedicated legacy Braiins S9 backend. Home Assistant entity platforms no longer call pyasic configuration methods directly.
 
-- pyasic is installed/reinstalled from integration code at runtime.
-- partially imported pyasic modules are deleted from `sys.modules` after reinstall attempts.
-- the integration pins one pyasic version in Python code while `pyproject.toml` has a separate version range.
-- Home Assistant code directly imports pyasic types and config objects in multiple platforms/services.
+The old runtime package installer and `sys.modules` manipulation have been removed. pyasic is a normal Home Assistant manifest requirement instead of being installed or force-reinstalled by integration code at runtime.
 
-Target: dependencies are declared normally and firmware libraries are hidden behind backend adapters.
+Generic legacy `BOSMiner` devices are deliberately read-only for configuration-changing operations. Power-limit and power-mode writes are enabled only by a dedicated backend that has positively validated the hardware identity and implements a safe write path.
 
-### Coordinator lifecycle
+## Braiins legacy safety
 
-- the coordinator calls `pyasic.get_miner()` on refresh, recreating the miner object repeatedly.
-- credentials and runtime state are applied after rediscovery.
-- transient discovery metadata can therefore affect control operations.
+pyasic 0.78.8 `BOSMiner.set_power_limit()` reconstructs a complete TOML file and derives `[format].model` from transient runtime attributes. If model detection is missing, an invalid `model = " "` can be written and BOSMiner may not restart.
 
-Target: detect and create one backend per config entry, reuse it, and let it manage its own connection/session lifecycle.
+The dedicated S9 backend therefore:
 
-### Entity model
+- validates `/tmp/sysinfo/board_name == am1-s9`;
+- independently validates `/etc/bosminer_model.json` reports `Antminer S9`;
+- validates the existing `/etc/bosminer.toml` before every write;
+- requires the existing `[autotuning]` schema to use `mode = "power_target"`;
+- changes only the existing `power_target` assignment;
+- preserves pools, fan/temp settings, formatting and unknown keys;
+- creates a dedicated validated backup instead of trusting firmware/pyasic `.bak` files;
+- writes to a temporary file and atomically replaces the active config;
+- re-reads and validates the file after replacement;
+- restarts BOSMiner and waits for telemetry to recover;
+- automatically restores the validated backup if the new config or restart fails;
+- verifies the rollback and waits for BOSMiner recovery again;
+- never silently applies S9 assumptions to unknown legacy Braiins hardware.
 
-- capability checks are made against pyasic miner attributes.
-- board/fan entities use fallback counts even when hardware topology is unknown.
-- device metadata is duplicated across platforms.
-- several entity names are assembled directly in Python instead of translation keys.
-
-Target: shared base entity, normalized `MinerSnapshot`, capability-driven entities, translation keys, no invented topology.
-
-### Control operations
-
-- `number.py` calls `miner.set_power_limit()` directly.
-- `switch.py` changes state optimistically and catches broad errors.
-- `services.py` imports pyasic mining-mode classes and edits firmware configuration directly.
-
-Target: all control methods go through `MinerBackend`; state is confirmed by refresh after commands.
-
-### Braiins legacy safety
-
-pyasic 0.78.8 `BOSMiner.set_power_limit()` obtains the existing config, converts it back into a pyasic model, reconstructs a complete TOML file, generates `[format].model` from transient runtime attributes, stops BOSminer, overwrites `/etc/bosminer.toml`, and restarts BOSminer. If model detection is missing, an invalid `model = " "` can be written.
-
-Target for the S9/Braiins legacy backend:
-
-- identify hardware independently from transient Python metadata;
-- require consistent board/model evidence before writes;
-- read the existing `/etc/bosminer.toml`;
-- change only the intended power-target field;
-- preserve pools, fan/temp settings and unknown keys;
-- write a separate temporary file;
-- validate before replacement;
-- maintain a dedicated validated HA backup, not the firmware/pyasic `.bak` file;
-- replace atomically and reload BOSminer;
-- verify service/API recovery;
-- roll back automatically if validation or startup fails;
-- never silently repair an ambiguous hardware identity.
-
-For a confidently identified Antminer S9 on the tested legacy Braiins firmware, the practical UI range can default to 400-1000 W in 100 W increments. This is a model/backend-specific default, not a global miner rule.
+For a positively identified Antminer S9 on the tested legacy Braiins firmware, the UI range is 400-1000 W in 100 W increments. This is backend/model specific, not a global miner rule.
 
 ## Target architecture
 
@@ -75,7 +48,8 @@ For a confidently identified Antminer S9 on the tested legacy Braiins firmware, 
 Home Assistant
   config_flow / options_flow
   coordinator
-  entity platforms
+  sensor / number / switch / button
+  services / device actions
   diagnostics
         |
         v
@@ -86,99 +60,113 @@ MinerBackend protocol
   - async_pause()/async_resume()
   - async_reboot()
   - async_restart_backend()
+  - async_set_power_mode()
         |
-        +-- BraiinsLegacyBackend
-        +-- future BraiinsModernBackend
+        +-- BraiinsLegacyS9Backend
+        +-- future native backends
         +-- PyasicBackend (generic compatibility)
 ```
-
-The backend returns a normalized immutable snapshot. Home Assistant does not depend on firmware-specific configuration classes.
 
 ## Phases
 
 ### Phase 1 - architecture and safety
 
-- [x] Create backend package.
-- [x] Define backend protocol, capabilities and normalized snapshot model.
-- [ ] Bring the existing Braiins `model = " "` safety guard into the rework branch.
-- [ ] Add a generic pyasic adapter that owns one persistent miner object.
-- [ ] Refactor coordinator to consume `MinerBackend` while preserving existing data keys during migration.
-- [ ] Refactor number/switch/services to call backend operations.
+- [x] Create backend package and normalized data model.
+- [x] Add capability contract and backend-specific exceptions.
+- [x] Reuse one persistent pyasic miner/backend per config entry.
+- [x] Refactor coordinator to consume the backend layer.
+- [x] Refactor number/switch/services/device actions to backend operations.
+- [x] Block unsafe generic legacy BOSMiner configuration writes.
+- [x] Preserve existing Home Assistant unique-ID formats where practical.
 
-Risk: medium. This changes internal boundaries but should preserve user-visible entities.
+### Phase 2 - dedicated Braiins legacy S9 backend
 
-### Phase 2 - dedicated Braiins legacy backend
-
-- [ ] Detect legacy Braiins S9 safely.
-- [ ] Read telemetry from BOSer/BOSminer RPC without depending on pyasic model state for writes.
-- [ ] Implement safe targeted power-limit editing over SSH.
-- [ ] Add validation, backup, atomic replacement and rollback.
+- [x] Detect legacy Braiins S9 from two independent firmware sources.
+- [x] Implement targeted `power_target` editing without reconstructing TOML.
+- [x] Add dedicated validated backup and rollback.
+- [x] Verify written config before restart.
+- [x] Poll for BOSMiner recovery after restart.
+- [x] Restore and verify the old config if startup/recovery fails.
+- [ ] Replace remaining pyasic telemetry dependency with direct BOSer/BOSMiner RPC where this provides a clear reliability benefit.
 - [ ] Confirm pause/resume/reboot semantics on real S9 hardware.
+- [ ] Run repeated real-device 400-1000 W power-target cycling tests.
 
-Risk: high for write operations. Real S9 validation is required before release.
+Real S9 hardware is required before declaring this backend release-tested.
 
 ### Phase 3 - Home Assistant UX
 
-- [ ] Simplify config flow to address first.
-- [ ] Auto-detect model, firmware and capabilities.
-- [ ] Ask only for credentials required by the detected backend.
-- [ ] Validate credentials before saving.
-- [ ] Prevent duplicate config entries by stable identity/IP.
-- [ ] Move min/max power overrides to advanced options.
-- [ ] Add translation keys and localized errors.
-- [ ] Add shared device entity base class.
-- [ ] Add buttons for stateless operations such as reboot/restart where appropriate.
-
-Risk: low/medium. Needs migration care to avoid changing unique IDs.
+- [x] Simplify onboarding to IP/hostname first.
+- [x] Stop automatically scanning entire local subnets during normal setup.
+- [x] Detect miner before requesting credentials.
+- [x] Ask only for credential types exposed by the detected miner.
+- [x] Validate connectivity and SSH credentials before saving where applicable.
+- [x] Prevent duplicate entries for the same configured host.
+- [x] Move generic min/max power overrides to advanced options.
+- [x] Add a version-1 to version-2 config-entry migration for old power-range data.
+- [x] Add translation keys and German translations.
+- [x] Add shared device entity base class.
+- [x] Add capability-driven reboot/restart buttons for stateless maintenance actions.
+- [x] Stop inventing three boards/four fans when topology is unknown.
+- [ ] Improve credential/error classification beyond string matching where backend APIs expose typed authentication errors.
+- [ ] Consider migrating runtime coordinator storage from `hass.data` to typed `ConfigEntry.runtime_data` after the current beta path is stable.
 
 ### Phase 4 - diagnostics and community hardware support
 
-- [ ] Implement HA diagnostics output.
-- [ ] Redact passwords, pool credentials, wallet/user strings and other secrets.
-- [ ] Include backend choice, capabilities and sanitized protocol metadata.
-- [ ] Add an issue template for unsupported miners with diagnostics attachment instructions.
-- [ ] Build parser fixtures from community submissions.
+- [x] Implement Home Assistant config-entry diagnostics.
+- [x] Redact host/IP/MAC/hostname from public diagnostics by default.
+- [x] Exclude passwords, pool credentials and raw miner config from generic diagnostics.
+- [x] Include backend choice, capabilities, topology and safety status.
+- [x] Add unsupported/untested miner GitHub issue template.
+- [x] Add explicit support-level documentation.
+- [ ] Add sanitized protocol samples when a native backend can expose them without secrets.
+- [ ] Add recorded community fixtures for S19/S21-class devices as submissions arrive.
 
-This is the main path for supporting expensive S19/S21-class miners without requiring maintainers to own every device.
+This is the primary route for supporting expensive hardware the maintainer does not own.
 
 ### Phase 5 - tests and CI
 
-No pytest suite is currently present in the repository.
+Implemented tests currently cover:
 
-Add tests for:
+- [x] backend power-range validation;
+- [x] S9 targeted TOML editing and text preservation;
+- [x] blank/corrupt model regression;
+- [x] wrong-model rejection;
+- [x] schema-change rejection;
+- [x] rollback after failed BOSMiner restart;
+- [x] generic legacy BOSMiner configuration-write blocking;
+- [x] service device-ID normalization.
 
-- backend capability contracts;
-- normalized snapshot parsing;
-- config flow success/authentication/failure/duplicate cases;
-- coordinator offline -> recovery behavior;
-- preservation of existing unique IDs;
-- S9 corrupt/blank model regression;
-- targeted TOML power-limit change;
-- rejected unsafe writes;
-- backup and rollback behavior;
-- pause/resume state confirmation;
-- sanitized diagnostics.
+Still required:
 
-CI should run on PRs to `develop` as well as `main` and include Ruff, pytest, hassfest/HACS validation where applicable.
+- [ ] config-flow success/auth/failure/duplicate tests with Home Assistant fixtures;
+- [ ] config-entry migration tests;
+- [ ] coordinator offline -> recovery tests;
+- [ ] entity unique-ID migration/regression tests;
+- [ ] diagnostics redaction tests;
+- [ ] button/switch post-command state tests;
+- [ ] recorded protocol fixture tests for community hardware.
+
+CI workflows are configured for Ruff, pytest, HACS validation and hassfest on development pull requests. GitHub Actions has not produced a run on this fork yet, so CI is **not considered verified** until Actions is enabled/running and the checks pass.
 
 ## Hardware test matrix
 
-| Hardware / firmware | Support target | Validation source |
+| Hardware / firmware | Support target | Current evidence |
 | --- | --- | --- |
-| Antminer S9 + legacy Braiins OS+ | Tested | maintainer hardware |
-| Newer Braiins-capable Antminers | Experimental initially | fixtures + community testers |
-| S19/S21 family | Do not claim full support without testing | community diagnostics and hardware testers |
-| Other pyasic-supported miners | Compatibility backend | pyasic + community reports |
+| Antminer S9 + legacy Braiins OS+ | Tested target | maintainer hardware available; write path still needs beta run |
+| Newer Braiins-capable Antminers | Experimental initially | community fixtures/testers required |
+| S19/S21 family | No full-support claim without testing | community diagnostics and hardware testers required |
+| Other pyasic-supported miners | Compatibility backend | pyasic capability + community reports |
 
 ## Definition of a safe beta
 
 Before a beta release from this fork:
 
-1. existing S9 entities load without changing unique IDs;
-2. monitoring works for at least several hours without recreating backend state every poll;
+1. existing S9 entities load without unexpected unique-ID changes;
+2. monitoring runs for several hours without recreating backend state every poll;
 3. repeated S9 power-limit changes cannot generate a blank model field;
-4. failed writes restore the previously validated config;
-5. stopping/resuming mining reports the actual post-command state;
-6. unsupported hardware remains read-only or refuses unsafe controls rather than guessing;
+4. failed writes restore the previously validated config and BOSMiner recovers;
+5. stopping/resuming mining reports actual post-command state;
+6. unsupported legacy BOSMiner hardware remains configuration-read-only rather than guessing;
 7. diagnostics contain no credentials or pool secrets;
-8. CI passes for every change targeting `develop`.
+8. Ruff, pytest, HACS validation and hassfest pass;
+9. the S9 power-write path passes real-hardware cycling tests before the draft PR is promoted.
