@@ -5,13 +5,17 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.miner.backends.base import BackendKind
+from custom_components.miner.backends.base import FanData
+from custom_components.miner.backends.base import HashboardData
 from custom_components.miner.backends.base import MinerSnapshot
 from custom_components.miner.backends.base import UnsafeConfigurationError
 from custom_components.miner.backends.braiins_legacy import ACTIVE_CONFIG_PATH
 from custom_components.miner.backends.braiins_legacy import BACKUP_PATH
 from custom_components.miner.backends.braiins_legacy import BraiinsLegacyS9Backend
 from custom_components.miner.backends.braiins_legacy import TEMP_PATH
-from custom_components.miner.backends.braiins_legacy import _average_board_temperature
+from custom_components.miner.backends.braiins_legacy import _merge_hashboards
+from custom_components.miner.backends.braiins_legacy import _s9_fans_from_rpc
+from custom_components.miner.backends.braiins_legacy import _s9_hashboards_from_temps
 from custom_components.miner.backends.braiins_legacy import _work_solver_board_temperature
 from custom_components.miner.backends.braiins_legacy import update_power_target
 from custom_components.miner.backends.pyasic_backend import PyasicBackend
@@ -134,17 +138,57 @@ def test_update_power_target_rejects_schema_change() -> None:
         update_power_target(missing, 600)
 
 
-def test_average_board_temperature_uses_legacy_temps_rpc() -> None:
-    """Average real S9 board readings without requiring pyasic model metadata."""
-    rpc_temps = {
-        "TEMPS": [
-            {"ID": 6, "Board": 42.0, "Chip": 53.0},
-            {"ID": 7, "Board": 44.5, "Chip": 55.0},
-            {"ID": 8, "Board": 43.0, "Chip": 54.0},
-        ]
-    }
+def test_s9_temps_parser_matches_real_22081_response() -> None:
+    """Parse the three physical S9 boards observed on Braiins OS+ 22.08.1."""
+    boards = _s9_hashboards_from_temps(
+        {
+            "TEMPS": [
+                {"Board": 43.5, "Chip": 54.1875, "ID": 6, "TEMP": 0},
+                {"Board": 42.625, "Chip": 54.8125, "ID": 7, "TEMP": 1},
+                {"Board": 42.3125, "Chip": 54.6875, "ID": 8, "TEMP": 2},
+            ]
+        }
+    )
 
-    assert _average_board_temperature(rpc_temps) == 43.17
+    assert [board.slot for board in boards] == [0, 1, 2]
+    assert boards[1].temperature == 42.625
+    assert boards[1].chip_temperature == 54.8125
+
+
+def test_s9_fans_parser_ignores_unpopulated_zero_rpm_headers() -> None:
+    """Expose only the two populated fans from the real S9 BOSer response."""
+    fans = _s9_fans_from_rpc(
+        {
+            "FANS": [
+                {"FAN": 0, "ID": 0, "RPM": 6180, "Speed": 100},
+                {"FAN": 1, "ID": 1, "RPM": 6120, "Speed": 100},
+                {"FAN": 2, "ID": 2, "RPM": 0, "Speed": 100},
+                {"FAN": 3, "ID": 3, "RPM": 0, "Speed": 100},
+            ]
+        }
+    )
+
+    assert fans == (FanData(index=0, speed=6180), FanData(index=1, speed=6120))
+
+
+def test_merge_hashboards_keeps_pyasic_hashrate_and_boser_temperatures() -> None:
+    """A partial pyasic board must receive temperatures from BOSer without losing hashrate."""
+    merged = _merge_hashboards(
+        (
+            HashboardData(slot=0, hashrate=2.68, temperature=44.0),
+            HashboardData(slot=1, hashrate=0.06),
+            HashboardData(slot=2, hashrate=2.69, temperature=42.0),
+        ),
+        (
+            HashboardData(slot=0, temperature=43.5, chip_temperature=54.1875),
+            HashboardData(slot=1, temperature=42.625, chip_temperature=54.8125),
+            HashboardData(slot=2, temperature=42.3125, chip_temperature=54.6875),
+        ),
+    )
+
+    assert merged[1].hashrate == 0.06
+    assert merged[1].temperature == 42.625
+    assert merged[1].chip_temperature == 54.8125
 
 
 def test_work_solver_temperature_matches_verified_22081_output() -> None:
@@ -192,16 +236,30 @@ async def test_validated_s9_identity_replaces_empty_pyasic_metadata(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_s9_refresh_fills_temperature_and_power_target_profile(monkeypatch) -> None:
-    """Fill missing legacy BOS+ telemetry from the dedicated S9 read path."""
+async def test_s9_refresh_merges_boser_telemetry_and_power_target_profile(monkeypatch) -> None:
+    """Merge BOSer temperatures/fans and normalize an Unknown active profile."""
 
     class FakeRPC:
+        """Return the verified read-only S9 telemetry shapes."""
+
         async def temps(self):
+            """Return three board/chip temperature rows."""
             return {
                 "TEMPS": [
-                    {"ID": 6, "Board": 43.0, "Chip": 54.0},
-                    {"ID": 7, "Board": 44.0, "Chip": 55.0},
-                    {"ID": 8, "Board": 45.0, "Chip": 56.0},
+                    {"ID": 6, "TEMP": 0, "Board": 43.5, "Chip": 54.1},
+                    {"ID": 7, "TEMP": 1, "Board": 42.6, "Chip": 54.8},
+                    {"ID": 8, "TEMP": 2, "Board": 42.3, "Chip": 54.7},
+                ]
+            }
+
+        async def fans(self):
+            """Return two populated and two empty fan headers."""
+            return {
+                "FANS": [
+                    {"FAN": 0, "RPM": 6180},
+                    {"FAN": 1, "RPM": 6120},
+                    {"FAN": 2, "RPM": 0},
+                    {"FAN": 3, "RPM": 0},
                 ]
             }
 
@@ -210,8 +268,8 @@ async def test_s9_refresh_fills_temperature_and_power_target_profile(monkeypatch
         supports_autotuning=True,
         supports_shutdown=False,
         supports_power_modes=False,
-        expected_fans=0,
-        expected_hashboards=0,
+        expected_fans=2,
+        expected_hashboards=3,
     )
     backend = BraiinsLegacyS9Backend(miner)
     backend._identity_validated = True
@@ -223,15 +281,71 @@ async def test_s9_refresh_fills_temperature_and_power_target_profile(monkeypatch
             firmware="22.08.1",
             power_limit=1000,
             temperature=None,
-            active_preset_name=None,
+            active_preset_name="Unknown",
+            hashboards=(
+                HashboardData(slot=0, hashrate=2.68),
+                HashboardData(slot=1, hashrate=0.06),
+                HashboardData(slot=2, hashrate=2.69),
+            ),
         )
 
     monkeypatch.setattr(PyasicBackend, "async_refresh", generic_refresh)
 
     snapshot = await backend.async_refresh()
 
-    assert snapshot.temperature == 44.0
+    assert snapshot.temperature == pytest.approx(42.8)
     assert snapshot.active_preset_name == "Power Target"
+    assert snapshot.hashboards[1].temperature == 42.6
+    assert snapshot.hashboards[1].hashrate == 0.06
+    assert snapshot.fans == (FanData(index=0, speed=6180), FanData(index=1, speed=6120))
+
+
+def test_s9_stabilizer_keeps_last_good_values_for_short_dropouts() -> None:
+    """Transient missing BOSer polls must not immediately blank HA sensors."""
+    miner = SimpleNamespace(
+        supports_autotuning=True,
+        supports_shutdown=False,
+        supports_power_modes=False,
+        expected_fans=2,
+        expected_hashboards=3,
+    )
+    backend = BraiinsLegacyS9Backend(miner)
+
+    first_boards = backend._stabilize_hashboards(
+        (HashboardData(slot=1, temperature=42.6, chip_temperature=54.8),)
+    )
+    first_fans = backend._stabilize_fans((FanData(index=0, speed=6180),))
+    second_boards = backend._stabilize_hashboards((HashboardData(slot=1),))
+    second_fans = backend._stabilize_fans(())
+
+    assert first_boards[0].temperature == 42.6
+    assert first_fans[0].speed == 6180
+    assert second_boards[0].temperature == 42.6
+    assert second_fans[0].speed == 6180
+
+
+def test_s9_stabilizer_expires_values_after_three_missing_polls() -> None:
+    """Persistent missing telemetry must eventually become unavailable."""
+    miner = SimpleNamespace(
+        supports_autotuning=True,
+        supports_shutdown=False,
+        supports_power_modes=False,
+        expected_fans=2,
+        expected_hashboards=3,
+    )
+    backend = BraiinsLegacyS9Backend(miner)
+    backend._stabilize_hashboards(
+        (HashboardData(slot=1, temperature=42.6, chip_temperature=54.8),)
+    )
+    backend._stabilize_fans((FanData(index=0, speed=6180),))
+
+    for _ in range(3):
+        boards = backend._stabilize_hashboards((HashboardData(slot=1),))
+        fans = backend._stabilize_fans(())
+
+    assert boards[0].temperature is None
+    assert boards[0].chip_temperature is None
+    assert fans[0].speed is None
 
 
 class FakeSSH:
