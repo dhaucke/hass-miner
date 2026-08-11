@@ -88,6 +88,8 @@ class PyasicBackend:
         try:
             data = await self.miner.get_data(include=options)
         except Exception as err:
+            # Preserve the existing VNish compatibility behavior while keeping
+            # it isolated inside the pyasic backend.
             if "config" not in str(err).lower():
                 raise
             options.remove(pyasic.DataOptions.CONFIG)
@@ -141,22 +143,21 @@ class PyasicBackend:
         return snapshot
 
     async def async_set_power_limit(self, value: int) -> None:
-        """Set a power limit, refusing known unsafe legacy Braiins writes."""
+        """Set power limit through pyasic for generic compatible miners."""
         if not self.capabilities.power_limit:
             raise BackendUnsupportedError("Power-limit control is not supported")
         self._power_range.validate(value)
 
-        # pyasic's legacy BOSMiner implementation rebuilds the complete TOML
-        # file and derives [format].model from transient runtime attributes.
-        # Refuse a known-dangerous call until the dedicated Braiins backend owns
-        # this operation.
+        # Old BraiinsOS/BOSMiner pyasic backends rebuild bosminer.toml from
+        # transient runtime metadata. If make/raw_model are missing this can
+        # generate format.model = " " and prevent BOSminer from restarting.
         if type(self.miner).__name__ == "BOSMiner":
             make = getattr(self.miner, "make", None)
             raw_model = getattr(self.miner, "raw_model", None)
             if not make or not raw_model:
                 raise UnsafeConfigurationError(
-                    "Legacy Braiins model detection is incomplete; refusing to "
-                    "overwrite bosminer.toml"
+                    "Braiins model detection is incomplete; refusing an unsafe "
+                    "bosminer.toml rewrite"
                 )
 
         result = await self.miner.set_power_limit(value)
@@ -194,6 +195,26 @@ class PyasicBackend:
         result = await self.miner.restart_backend()
         if result is False:
             raise RuntimeError("Miner did not acknowledge backend restart request")
+
+    async def async_set_power_mode(self, mode: str) -> None:
+        """Set pyasic power mode through the compatibility layer."""
+        if not self.capabilities.power_modes:
+            raise BackendUnsupportedError("Power modes are not supported")
+
+        from pyasic.config.mining import MiningModeConfig
+
+        modes = {
+            "high": MiningModeConfig.high,
+            "normal": MiningModeConfig.normal,
+            "low": MiningModeConfig.low,
+        }
+        factory = modes.get(mode)
+        if factory is None:
+            raise ValueError(f"Unsupported power mode: {mode}")
+
+        config = await self.miner.get_config()
+        config.mining_mode = factory()
+        await self.miner.send_config(config)
 
     async def async_diagnostics(self) -> dict[str, object]:
         """Return sanitized generic diagnostics without credentials or pools."""
