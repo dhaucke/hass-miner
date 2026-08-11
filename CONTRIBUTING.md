@@ -1,75 +1,46 @@
-# Contribution guidelines
+# Contributing
 
-Contributing to this project should be as easy and transparent as possible, whether it's:
+Contributions are welcome for bug fixes, new miner support, documentation and tests.
 
-- Reporting a bug
-- Discussing the current state of the code
-- Submitting a fix
-- Proposing new features
+## Workflow
 
-## Github is used for everything
+1. Fork the repository.
+2. Create a branch from `main`.
+3. Keep changes focused and update documentation when behavior changes.
+4. Add or update regression tests for code changes.
+5. Run the local checks.
+6. Open a pull request against `main`.
 
-Github is used to host code, to track issues and feature requests, as well as accept pull requests.
+## Local checks
 
-Pull requests are the best way to propose changes to the codebase.
-
-1. Fork the repo and create your branch from `master`.
-2. If you've changed something, update the documentation.
-3. Make sure your code lints (using black).
-4. Test you contribution.
-5. Issue that pull request!
-
-## Any contributions you make will be under the MIT Software License
-
-In short, when you submit code changes, your submissions are understood to be under the same [MIT License](http://choosealicense.com/licenses/mit/) that covers the project. Feel free to contact the maintainers if that's a concern.
-
-## Report bugs using Github's [issues](../../issues)
-
-GitHub issues are used to track public bugs.
-Report a bug by [opening a new issue](../../issues/new/choose); it's that easy!
-
-## Write bug reports with detail, background, and sample code
-
-**Great Bug Reports** tend to have:
-
-- A quick summary and/or background
-- Steps to reproduce
-  - Be specific!
-  - Give sample code if you can.
-- What you expected would happen
-- What actually happens
-- Notes (possibly including why you think this might be happening, or stuff you tried that didn't work)
-
-People _love_ thorough bug reports. I'm not even kidding.
-
-## Use a Consistent Coding Style
-
-Use [black](https://github.com/ambv/black) and [prettier](https://prettier.io/)
-to make sure the code follows the style.
-
-Or use the `pre-commit` settings implemented in this repository
-(see deicated section below).
-
-## Pre-commit
-
-You can use the [pre-commit](https://pre-commit.com/) settings included in the
-repostory to have code style and linting checks.
-
-With `pre-commit` tool already installed,
-activate the settings of the repository:
-
-```console
-$ pre-commit install
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m ruff check .
+python3 -m pytest -q
 ```
 
-Now the pre-commit tests will be done every time you commit.
+GitHub Actions also run HACS validation and Home Assistant hassfest checks.
 
-You can run the tests on all repository file with the command:
+## Miner support and write operations
 
-```console
-$ pre-commit run --all-files
-```
+New miner families should start read-only. Do not enable firmware-specific configuration writes based only on model-name guesses or generic library detection.
+
+For write support, include enough evidence to validate the target hardware/firmware path and add regression coverage. When maintainers do not have the hardware, sanitized diagnostics and read-only API samples are useful.
+
+Never include real passwords, private keys, pool credentials or wallet addresses in fixtures, logs, issues or pull requests.
+
+## Bug reports
+
+Please include:
+
+- Home Assistant version,
+- hass-miner version,
+- miner model and firmware,
+- steps to reproduce,
+- expected and actual behavior,
+- relevant Home Assistant logs,
+- diagnostics export where useful.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under its MIT License.
+By contributing, you agree that your contributions are licensed under the repository's MIT License.
