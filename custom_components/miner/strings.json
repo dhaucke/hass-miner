@@ -70,6 +70,10 @@
     },
     "switch": {
       "active": {"name": "Mining"}
+    },
+    "button": {
+      "reboot": {"name": "Reboot"},
+      "restart_backend": {"name": "Restart mining backend"}
     }
   },
   "services": {
