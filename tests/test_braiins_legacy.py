@@ -11,6 +11,8 @@ from custom_components.miner.backends.braiins_legacy import ACTIVE_CONFIG_PATH
 from custom_components.miner.backends.braiins_legacy import BACKUP_PATH
 from custom_components.miner.backends.braiins_legacy import BraiinsLegacyS9Backend
 from custom_components.miner.backends.braiins_legacy import TEMP_PATH
+from custom_components.miner.backends.braiins_legacy import _average_board_temperature
+from custom_components.miner.backends.braiins_legacy import _work_solver_board_temperature
 from custom_components.miner.backends.braiins_legacy import update_power_target
 from custom_components.miner.backends.pyasic_backend import PyasicBackend
 
@@ -132,6 +134,31 @@ def test_update_power_target_rejects_schema_change() -> None:
         update_power_target(missing, 600)
 
 
+def test_average_board_temperature_uses_legacy_temps_rpc() -> None:
+    """Average real S9 board readings without requiring pyasic model metadata."""
+    rpc_temps = {
+        "TEMPS": [
+            {"ID": 6, "Board": 42.0, "Chip": 53.0},
+            {"ID": 7, "Board": 44.5, "Chip": 55.0},
+            {"ID": 8, "Board": 43.0, "Chip": 54.0},
+        ]
+    }
+
+    assert _average_board_temperature(rpc_temps) == 43.17
+
+
+def test_work_solver_temperature_matches_verified_22081_output() -> None:
+    """Parse the aggregate Board temperature observed on Braiins OS+ 22.08.1."""
+    raw = """{
+      "temperatures": [
+        {"location": "Board", "degrees_c": 43.5625},
+        {"location": "Chip", "degrees_c": 55.0}
+      ]
+    }"""
+
+    assert _work_solver_board_temperature(raw) == 43.5625
+
+
 @pytest.mark.asyncio
 async def test_validated_s9_identity_replaces_empty_pyasic_metadata(monkeypatch) -> None:
     """Independent S9 identity checks should drive Home Assistant device metadata."""
@@ -162,6 +189,49 @@ async def test_validated_s9_identity_replaces_empty_pyasic_metadata(monkeypatch)
     assert snapshot.manufacturer == "Bitmain"
     assert snapshot.model == "Antminer S9"
     assert snapshot.firmware == "22.08.1"
+
+
+@pytest.mark.asyncio
+async def test_s9_refresh_fills_temperature_and_power_target_profile(monkeypatch) -> None:
+    """Fill missing legacy BOS+ telemetry from the dedicated S9 read path."""
+
+    class FakeRPC:
+        async def temps(self):
+            return {
+                "TEMPS": [
+                    {"ID": 6, "Board": 43.0, "Chip": 54.0},
+                    {"ID": 7, "Board": 44.0, "Chip": 55.0},
+                    {"ID": 8, "Board": 45.0, "Chip": 56.0},
+                ]
+            }
+
+    miner = SimpleNamespace(
+        rpc=FakeRPC(),
+        supports_autotuning=True,
+        supports_shutdown=False,
+        supports_power_modes=False,
+        expected_fans=0,
+        expected_hashboards=0,
+    )
+    backend = BraiinsLegacyS9Backend(miner)
+    backend._identity_validated = True
+
+    async def generic_refresh(_self) -> MinerSnapshot:
+        return MinerSnapshot(
+            host="192.0.2.10",
+            backend=BackendKind.PYASIC,
+            firmware="22.08.1",
+            power_limit=1000,
+            temperature=None,
+            active_preset_name=None,
+        )
+
+    monkeypatch.setattr(PyasicBackend, "async_refresh", generic_refresh)
+
+    snapshot = await backend.async_refresh()
+
+    assert snapshot.temperature == 44.0
+    assert snapshot.active_preset_name == "Power Target"
 
 
 class FakeSSH:
