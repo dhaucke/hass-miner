@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.6] - 2026-08-12
+
+### Added
+
+- Regression tests for the generic pyasic backend against Antminer S19/S21/S21+
+  and Hydro model shapes (`tests/test_pyasic_backend_antminer_models.py`), since
+  none of this hardware is owned by the maintainer. Pins down two real pyasic
+  facts: stock BMMiner/AntminerModern firmware never sets `supports_autotuning`,
+  so factory S19/S21/S21+ units cannot receive power-limit writes through pyasic
+  at all (only high/normal/low presets via `supports_power_modes`); and Hydro
+  variants report `expected_fans = 0` while board temperatures still populate
+  normally. Also documents a known, deliberately *not* fixed gap: pyasic exposes
+  presets on VNish/LuxOS through a separate `supports_presets` flag that
+  `PyasicBackend` does not read. Investigated fixing it by also checking
+  `supports_presets`, but pyasic's `MiningModeConfig` high/normal/low values have
+  no `as_vnish()`/`as_luxos()` serializer, so the generic mining-mode write would
+  silently no-op instead of failing — enabling it would be unsafe without real
+  hardware to validate a proper preset-based implementation. Whatsminer/BTMiner
+  already sets `supports_power_modes` directly and is unaffected.
+
 ## [2.0.5] - 2026-08-12
 
 ### Fixed
