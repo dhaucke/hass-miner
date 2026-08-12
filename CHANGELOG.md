@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.9] - 2026-08-12
+
+### Added
+
+- New diagnostic sensor "Connection method" (`backend`) showing which backend
+  is currently active for a miner (e.g. "Validated S9 (SSH)" vs "Generic
+  (pyasic, network)"). Prompted directly by a live debugging session where a
+  miner silently ran on the generic RPC backend for a whole session instead
+  of the validated SSH-backed `braiins_legacy` backend, with no way to see
+  that from the Home Assistant UI without downloading logs and matching
+  traceback file paths. The value was already computed in `coordinator.py`
+  (used only for diagnostics downloads); it is now also surfaced through the
+  existing `miner_sensors` dict so it picks up a regular sensor entity for
+  free, with translated, human-readable state values in `en.json`/`de.json`.
+
 ## [2.0.8] - 2026-08-12
 
 ### Fixed

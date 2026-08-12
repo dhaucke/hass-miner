@@ -8,6 +8,8 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 import custom_components.miner.coordinator as coordinator_module
 from custom_components.miner.backends.base import BackendKind
+from custom_components.miner.backends.base import MinerCapabilities
+from custom_components.miner.backends.base import MinerSnapshot
 from custom_components.miner.coordinator import MinerCoordinator
 from custom_components.miner.coordinator import RECONNECT_AFTER_FAILURES
 
@@ -82,6 +84,38 @@ def test_command_failure_is_ignored_for_validated_braiins_legacy_backend() -> No
 
     assert reset_calls == []
     assert coordinator.backend is backend
+
+
+@pytest.mark.asyncio
+async def test_backend_kind_is_exposed_as_a_sensor_value() -> None:
+    """The active backend must be visible as a user-facing sensor value.
+
+    Regression coverage for a real-world debugging session where a miner
+    silently ran on the generic pyasic backend for hours instead of the
+    validated SSH-based braiins_legacy backend, and there was no way to see
+    that from the Home Assistant UI without downloading logs.
+    """
+    snapshot = MinerSnapshot(host="10.0.0.5", backend=BackendKind.BRAIINS_LEGACY)
+
+    class FakeBackend:
+        kind = BackendKind.BRAIINS_LEGACY
+        capabilities = MinerCapabilities()
+
+        async def async_refresh(self):
+            return snapshot
+
+    fake = SimpleNamespace(
+        backend=FakeBackend(),
+        _failure_count=0,
+        _record_failure=lambda: None,
+        configured_min_power=15,
+        configured_max_power=10000,
+    )
+
+    data = await MinerCoordinator._async_update_data(fake)
+
+    assert data["backend"] == "braiins_legacy"
+    assert data["miner_sensors"]["backend"] == "braiins_legacy"
 
 
 @pytest.mark.asyncio

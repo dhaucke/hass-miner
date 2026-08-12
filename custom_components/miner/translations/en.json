@@ -63,7 +63,15 @@
       "power_limit": {"name": "Power limit"},
       "miner_consumption": {"name": "Power consumption"},
       "efficiency": {"name": "Efficiency"},
-      "fan_speed": {"name": "Fan {fan} speed"}
+      "fan_speed": {"name": "Fan {fan} speed"},
+      "backend": {
+        "name": "Connection method",
+        "state": {
+          "pyasic": "Generic (pyasic, network)",
+          "braiins_legacy": "Validated S9 (SSH)",
+          "braiins_modern": "Braiins OS+ (network)"
+        }
+      }
     },
     "number": {
       "power_limit": {"name": "Power limit"}

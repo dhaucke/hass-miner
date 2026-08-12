@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
+from .backends.base import BackendKind
 from .const import DOMAIN
 from .const import JOULES_PER_TERA_HASH
 from .const import TERA_HASH_PER_SECOND
@@ -103,6 +104,13 @@ ENTITY_DESCRIPTION_KEY_MAP: dict[str, SensorEntityDescription] = {
         translation_key="fan_speed",
         native_unit_of_measurement=REVOLUTIONS_PER_MINUTE,
         state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "backend": SensorEntityDescription(
+        key="backend",
+        translation_key="backend",
+        device_class=SensorDeviceClass.ENUM,
+        options=[kind.value for kind in BackendKind],
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
 }

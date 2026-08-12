@@ -229,6 +229,7 @@ class MinerCoordinator(DataUpdateCoordinator):
                 "power_limit": snapshot.power_limit,
                 "miner_consumption": snapshot.consumption,
                 "efficiency": snapshot.efficiency,
+                "backend": snapshot.backend.value,
             },
             "board_sensors": {
                 board.slot: {

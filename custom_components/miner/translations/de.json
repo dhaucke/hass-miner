@@ -63,7 +63,15 @@
       "power_limit": {"name": "Leistungslimit"},
       "miner_consumption": {"name": "Leistungsaufnahme"},
       "efficiency": {"name": "Effizienz"},
-      "fan_speed": {"name": "Lüfter {fan} Drehzahl"}
+      "fan_speed": {"name": "Lüfter {fan} Drehzahl"},
+      "backend": {
+        "name": "Verbindungsweg",
+        "state": {
+          "pyasic": "Generisch (pyasic, Netzwerk)",
+          "braiins_legacy": "Validierter S9 (SSH)",
+          "braiins_modern": "Braiins OS+ (Netzwerk)"
+        }
+      }
     },
     "number": {
       "power_limit": {"name": "Leistungslimit"}
