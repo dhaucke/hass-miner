@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.10] - 2026-08-12
+
+### Added
+
+- Coordinator now periodically retries S9 identity validation for a miner
+  stuck on the generic pyasic backend, every 5 minutes, and upgrades in
+  place to the validated SSH-backed braiins_legacy backend as soon as it
+  succeeds -- without disturbing the currently working generic backend if
+  the attempt fails again. Previously the generic backend was only ever a
+  one-shot fallback: once selected (e.g. after a one-time SSH hiccup during
+  startup), it had no way to self-upgrade as long as both telemetry reads
+  and writes happened to keep succeeding through it, since there was no
+  failure for `record_command_failure`/`_record_failure` to react to. SSH is
+  meant to be the preferred path for a real S9, not a permanent fallback.
+
 ## [2.0.9] - 2026-08-12
 
 ### Added

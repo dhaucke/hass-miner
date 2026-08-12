@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .backends.base import BackendKind
 from .backends.base import MinerBackend
@@ -35,6 +36,7 @@ DEFAULT_MAX_POWER = 10000
 RECONNECT_AFTER_FAILURES = 3
 DISCOVERY_TIMEOUT_SECONDS = 5.0
 REFRESH_TIMEOUT_SECONDS = 6.0
+UPGRADE_RETRY_INTERVAL = timedelta(minutes=5)
 
 
 class MinerCoordinator(DataUpdateCoordinator):
@@ -47,6 +49,7 @@ class MinerCoordinator(DataUpdateCoordinator):
         self.miner = None
         self.backend: MinerBackend | None = None
         self._failure_count = 0
+        self._next_upgrade_attempt = None
         super().__init__(
             hass=hass,
             logger=_LOGGER,
@@ -124,6 +127,38 @@ class MinerCoordinator(DataUpdateCoordinator):
             return
         self._reset_runtime_backend()
 
+    async def _async_maybe_upgrade_backend(self) -> None:
+        """Periodically retry the validated S9 backend for a generic fallback.
+
+        A backend that fell back to the generic pyasic path (for example
+        after a one-time SSH hiccup during startup) would otherwise never
+        retry the safer, dedicated braiins_legacy backend as long as both
+        telemetry reads and writes happen to keep succeeding through the
+        generic path -- there is no failure to react to. Re-run identity
+        validation on a slow interval instead, without disturbing the
+        currently working backend if the attempt fails again.
+        """
+        if self.backend is None or self.backend.kind is BackendKind.BRAIINS_LEGACY:
+            return
+
+        now = dt_util.utcnow()
+        if self._next_upgrade_attempt is not None and now < self._next_upgrade_attempt:
+            return
+        self._next_upgrade_attempt = now + UPGRADE_RETRY_INTERVAL
+
+        candidate = await async_create_backend(
+            self.miner,
+            minimum_power=self.configured_min_power,
+            maximum_power=self.configured_max_power,
+        )
+        if candidate.kind is BackendKind.BRAIINS_LEGACY:
+            _LOGGER.info(
+                "%s: upgraded from %s to validated braiins_legacy backend",
+                self.config_entry.title,
+                self.backend.kind.value,
+            )
+            self.backend = candidate
+
     async def get_miner(self):
         """Return the persistent pyasic miner used for discovery/compatibility."""
         if self.miner is not None:
@@ -199,6 +234,7 @@ class MinerCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Miner update failed: {err}") from err
 
         self._failure_count = 0
+        await self._async_maybe_upgrade_backend()
         capabilities = self.backend.capabilities
         power_range = capabilities.power_limit_range
 

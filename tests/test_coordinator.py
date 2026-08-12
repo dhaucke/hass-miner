@@ -87,6 +87,106 @@ def test_command_failure_is_ignored_for_validated_braiins_legacy_backend() -> No
 
 
 @pytest.mark.asyncio
+async def test_upgrade_is_skipped_for_already_validated_backend(monkeypatch) -> None:
+    """A validated braiins_legacy backend must never be re-probed or swapped."""
+    calls: list[bool] = []
+
+    async def fake_create_backend(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("must not be called for an already-validated backend")
+
+    monkeypatch.setattr(coordinator_module, "async_create_backend", fake_create_backend)
+
+    backend = SimpleNamespace(kind=BackendKind.BRAIINS_LEGACY)
+    fake = SimpleNamespace(
+        backend=backend,
+        miner=object(),
+        _next_upgrade_attempt=None,
+        configured_min_power=15,
+        configured_max_power=10000,
+    )
+
+    await MinerCoordinator._async_maybe_upgrade_backend(fake)
+
+    assert calls == []
+    assert fake.backend is backend
+
+
+@pytest.mark.asyncio
+async def test_upgrade_swaps_to_validated_backend_when_available(monkeypatch) -> None:
+    """A generic backend must upgrade in place once S9 identity validates."""
+    validated = SimpleNamespace(kind=BackendKind.BRAIINS_LEGACY)
+
+    async def fake_create_backend(*args, **kwargs):
+        return validated
+
+    monkeypatch.setattr(coordinator_module, "async_create_backend", fake_create_backend)
+
+    generic = SimpleNamespace(kind=BackendKind.PYASIC)
+    fake = SimpleNamespace(
+        backend=generic,
+        miner=object(),
+        _next_upgrade_attempt=None,
+        configured_min_power=15,
+        configured_max_power=10000,
+        config_entry=SimpleNamespace(title="Test Miner"),
+    )
+
+    await MinerCoordinator._async_maybe_upgrade_backend(fake)
+
+    assert fake.backend is validated
+
+
+@pytest.mark.asyncio
+async def test_upgrade_keeps_generic_backend_when_still_unavailable(monkeypatch) -> None:
+    """A failed re-validation attempt must not disturb the working backend."""
+    still_generic = SimpleNamespace(kind=BackendKind.PYASIC)
+
+    async def fake_create_backend(*args, **kwargs):
+        return still_generic
+
+    monkeypatch.setattr(coordinator_module, "async_create_backend", fake_create_backend)
+
+    original = SimpleNamespace(kind=BackendKind.PYASIC)
+    fake = SimpleNamespace(
+        backend=original,
+        miner=object(),
+        _next_upgrade_attempt=None,
+        configured_min_power=15,
+        configured_max_power=10000,
+    )
+
+    await MinerCoordinator._async_maybe_upgrade_backend(fake)
+
+    assert fake.backend is original
+
+
+@pytest.mark.asyncio
+async def test_upgrade_respects_retry_interval(monkeypatch) -> None:
+    """Repeated polls must not re-probe identity on every update cycle."""
+    calls: list[bool] = []
+
+    async def fake_create_backend(*args, **kwargs):
+        calls.append(True)
+        return SimpleNamespace(kind=BackendKind.PYASIC)
+
+    monkeypatch.setattr(coordinator_module, "async_create_backend", fake_create_backend)
+
+    fake = SimpleNamespace(
+        backend=SimpleNamespace(kind=BackendKind.PYASIC),
+        miner=object(),
+        _next_upgrade_attempt=None,
+        configured_min_power=15,
+        configured_max_power=10000,
+    )
+
+    await MinerCoordinator._async_maybe_upgrade_backend(fake)
+    await MinerCoordinator._async_maybe_upgrade_backend(fake)
+
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_backend_kind_is_exposed_as_a_sensor_value() -> None:
     """The active backend must be visible as a user-facing sensor value.
 
@@ -104,10 +204,14 @@ async def test_backend_kind_is_exposed_as_a_sensor_value() -> None:
         async def async_refresh(self):
             return snapshot
 
+    async def _noop_upgrade():
+        return None
+
     fake = SimpleNamespace(
         backend=FakeBackend(),
         _failure_count=0,
         _record_failure=lambda: None,
+        _async_maybe_upgrade_backend=_noop_upgrade,
         configured_min_power=15,
         configured_max_power=10000,
     )
