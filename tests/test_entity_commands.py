@@ -34,10 +34,15 @@ class FakeCoordinator:
         self.backend = backend
         self.config_entry = SimpleNamespace(title="Test Miner")
         self.refreshes = 0
+        self.command_failures = 0
 
     async def async_request_refresh(self) -> None:
         """Record one requested state refresh."""
         self.refreshes += 1
+
+    def record_command_failure(self) -> None:
+        """Record one failed command, mirroring MinerCoordinator's rediscovery hook."""
+        self.command_failures += 1
 
 
 def _generic_switch_entity(coordinator: FakeCoordinator) -> SimpleNamespace:
@@ -104,6 +109,7 @@ async def test_switch_does_not_refresh_when_command_fails() -> None:
         await MinerActiveSwitch.async_turn_on(entity)
 
     assert coordinator.refreshes == 0
+    assert coordinator.command_failures == 1
 
 
 @pytest.mark.asyncio

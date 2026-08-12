@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.8] - 2026-08-12
+
+### Fixed
+
+- Coordinator now rediscovers the backend after a failed write (switch/number/
+  button/service call), not only after repeated telemetry-read failures. Live
+  diagnosis on a real S9 showed a miner stuck on the generic `pyasic` backend
+  for an entire session -- 114 `async_resume()` calls all going through
+  `pyasic_backend.py` (RPC), never through the dedicated SSH-backed
+  `braiins_legacy` backend -- because S9 identity validation apparently
+  failed once at HA startup, and successful telemetry polling kept resetting
+  the existing read-failure counter before it ever reached the 3-strike
+  rediscovery threshold. Added `MinerCoordinator.record_command_failure()`,
+  called from every entity/service command failure, which forces immediate
+  rediscovery unless the backend already validated as `braiins_legacy` (same
+  guard `_record_failure` uses, so an already-validated S9's SSH transport is
+  never discarded over an unrelated resume/pause hiccup).
+
 ## [2.0.7] - 2026-08-12
 
 ### Fixed

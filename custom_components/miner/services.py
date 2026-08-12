@@ -23,10 +23,27 @@ def _normalize_device_ids(value) -> list[str]:
     return list(value)
 
 
-async def _async_gather_backend_calls(action: str, calls) -> None:
-    """Run backend calls in parallel, surfacing failures as HomeAssistantError."""
+async def _async_run_tracked(coordinator, action: str, coro) -> None:
+    """Run one backend call, recording a command failure on the right coordinator."""
     try:
-        await asyncio.gather(*calls)
+        await coro
+    except HomeAssistantError as err:
+        coordinator.record_command_failure()
+        raise err
+    except Exception as err:
+        coordinator.record_command_failure()
+        raise HomeAssistantError(f"Failed to {action}: {err}") from err
+
+
+async def _async_gather_backend_calls(action: str, coordinators, make_coro) -> None:
+    """Run one backend call per coordinator in parallel, tracking failures."""
+    try:
+        await asyncio.gather(
+            *(
+                _async_run_tracked(coordinator, action, make_coro(coordinator.backend))
+                for coordinator in coordinators
+            )
+        )
     except HomeAssistantError:
         raise
     except Exception as err:
@@ -38,45 +55,47 @@ async def async_setup_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_REBOOT):
         return
 
-    def get_backends(call: ServiceCall):
-        """Resolve selected devices to active miner backends."""
+    def get_coordinators(call: ServiceCall):
+        """Resolve selected devices to active miner coordinators."""
         device_ids = _normalize_device_ids(call.data.get(CONF_DEVICE_ID))
         registry = async_get_device_registry(hass)
-        backends = []
+        coordinators = []
         for device_id in device_ids:
             device = registry.async_get(device_id)
             if device is None or device.primary_config_entry is None:
                 continue
             coordinator = hass.data.get(DOMAIN, {}).get(device.primary_config_entry)
             if coordinator is not None and coordinator.backend is not None:
-                backends.append(coordinator.backend)
-        return backends
+                coordinators.append(coordinator)
+        return coordinators
 
     async def reboot(call: ServiceCall) -> None:
         """Reboot selected miners through their backend."""
-        backends = get_backends(call)
-        if backends:
+        coordinators = get_coordinators(call)
+        if coordinators:
             await _async_gather_backend_calls(
-                "reboot miner", (backend.async_reboot() for backend in backends)
+                "reboot miner", coordinators, lambda backend: backend.async_reboot()
             )
 
     async def restart_backend(call: ServiceCall) -> None:
         """Restart the mining backend on selected devices."""
-        backends = get_backends(call)
-        if backends:
+        coordinators = get_coordinators(call)
+        if coordinators:
             await _async_gather_backend_calls(
                 "restart mining backend",
-                (backend.async_restart_backend() for backend in backends),
+                coordinators,
+                lambda backend: backend.async_restart_backend(),
             )
 
     async def set_work_mode(call: ServiceCall) -> None:
         """Set a firmware-defined power mode on selected miners."""
-        backends = get_backends(call)
-        if backends:
+        coordinators = get_coordinators(call)
+        if coordinators:
             mode = call.data["mode"]
             await _async_gather_backend_calls(
                 "set work mode",
-                (backend.async_set_power_mode(mode) for backend in backends),
+                coordinators,
+                lambda backend: backend.async_set_power_mode(mode),
             )
 
     hass.services.async_register(DOMAIN, SERVICE_REBOOT, reboot)

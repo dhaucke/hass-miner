@@ -136,9 +136,11 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
 
         try:
             await backend.async_resume()
-        except HomeAssistantError:
-            raise
+        except HomeAssistantError as err:
+            self.coordinator.record_command_failure()
+            raise err
         except Exception as err:
+            self.coordinator.record_command_failure()
             raise HomeAssistantError(f"Failed to resume mining: {err}") from err
         await self.coordinator.async_request_refresh()
 
@@ -159,9 +161,11 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
 
         try:
             await backend.async_pause()
-        except HomeAssistantError:
-            raise
+        except HomeAssistantError as err:
+            self.coordinator.record_command_failure()
+            raise err
         except Exception as err:
+            self.coordinator.record_command_failure()
             raise HomeAssistantError(f"Failed to pause mining: {err}") from err
         await self.coordinator.async_request_refresh()
 

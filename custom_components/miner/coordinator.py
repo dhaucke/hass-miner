@@ -108,6 +108,22 @@ class MinerCoordinator(DataUpdateCoordinator):
         if self._failure_count >= RECONNECT_AFTER_FAILURES:
             self._reset_runtime_backend()
 
+    def record_command_failure(self) -> None:
+        """Force rediscovery after a failed write on a non-validated backend.
+
+        Telemetry polling can keep succeeding (resetting the read-failure
+        counter every update_interval) even while every write command fails,
+        for example when S9 identity validation failed once at startup and
+        the coordinator has been stuck on the generic pyasic backend ever
+        since. A failed write is a strong, immediate signal that rediscovery
+        is worth retrying, so it bypasses the read-failure threshold. A
+        backend already validated as BRAIINS_LEGACY is left alone, matching
+        the same policy _record_failure uses for read failures.
+        """
+        if self.backend is not None and self.backend.kind is BackendKind.BRAIINS_LEGACY:
+            return
+        self._reset_runtime_backend()
+
     async def get_miner(self):
         """Return the persistent pyasic miner used for discovery/compatibility."""
         if self.miner is not None:

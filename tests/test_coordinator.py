@@ -58,6 +58,32 @@ def test_legacy_braiins_backend_is_kept_when_bosminer_stops() -> None:
     assert coordinator._failure_count == RECONNECT_AFTER_FAILURES + 2
 
 
+def test_command_failure_forces_immediate_rediscovery_for_generic_backend() -> None:
+    """A single failed write on a generic backend must trigger rediscovery.
+
+    Reads keep resetting _failure_count via the normal 10s poll even when
+    every write fails (e.g. a generic backend stuck since a one-time S9
+    identity-validation failure at startup), so writes cannot rely on the
+    same 3-strike threshold used for read failures.
+    """
+    coordinator, reset_calls = _coordinator_stub()
+
+    MinerCoordinator.record_command_failure(coordinator)
+
+    assert reset_calls == [True]
+
+
+def test_command_failure_is_ignored_for_validated_braiins_legacy_backend() -> None:
+    """A failed write on an already-validated S9 backend must not discard it."""
+    backend = SimpleNamespace(kind=BackendKind.BRAIINS_LEGACY)
+    coordinator, reset_calls = _coordinator_stub(backend=backend)
+
+    MinerCoordinator.record_command_failure(coordinator)
+
+    assert reset_calls == []
+    assert coordinator.backend is backend
+
+
 @pytest.mark.asyncio
 async def test_discovery_timeout_fails_fast(monkeypatch) -> None:
     """A stalled pyasic discovery must not hold Home Assistant startup indefinitely."""

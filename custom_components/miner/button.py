@@ -89,9 +89,11 @@ class MinerCommandButton(MinerEntity, ButtonEntity):
         """Execute the backend command and refresh miner state."""
         try:
             await self._command()
-        except HomeAssistantError:
-            raise
+        except HomeAssistantError as err:
+            self.coordinator.record_command_failure()
+            raise err
         except Exception as err:
+            self.coordinator.record_command_failure()
             raise HomeAssistantError(
                 f"Failed to execute {self.entity_description.key}: {err}"
             ) from err

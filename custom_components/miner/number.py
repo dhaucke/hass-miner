@@ -95,9 +95,11 @@ class MinerPowerLimitNumber(MinerEntity, NumberEntity):
         )
         try:
             await backend.async_set_power_limit(requested)
-        except HomeAssistantError:
-            raise
+        except HomeAssistantError as err:
+            self.coordinator.record_command_failure()
+            raise err
         except Exception as err:
+            self.coordinator.record_command_failure()
             raise HomeAssistantError(f"Failed to set power limit: {err}") from err
         await self.coordinator.async_request_refresh()
 
