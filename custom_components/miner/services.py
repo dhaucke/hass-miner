@@ -5,6 +5,7 @@ import asyncio
 
 from homeassistant.const import CONF_DEVICE_ID
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
 
 from .const import DOMAIN
@@ -20,6 +21,16 @@ def _normalize_device_ids(value) -> list[str]:
     if isinstance(value, str):
         return [value]
     return list(value)
+
+
+async def _async_gather_backend_calls(action: str, calls) -> None:
+    """Run backend calls in parallel, surfacing failures as HomeAssistantError."""
+    try:
+        await asyncio.gather(*calls)
+    except HomeAssistantError:
+        raise
+    except Exception as err:
+        raise HomeAssistantError(f"Failed to {action}: {err}") from err
 
 
 async def async_setup_services(hass: HomeAssistant) -> None:
@@ -45,14 +56,17 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         """Reboot selected miners through their backend."""
         backends = get_backends(call)
         if backends:
-            await asyncio.gather(*(backend.async_reboot() for backend in backends))
+            await _async_gather_backend_calls(
+                "reboot miner", (backend.async_reboot() for backend in backends)
+            )
 
     async def restart_backend(call: ServiceCall) -> None:
         """Restart the mining backend on selected devices."""
         backends = get_backends(call)
         if backends:
-            await asyncio.gather(
-                *(backend.async_restart_backend() for backend in backends)
+            await _async_gather_backend_calls(
+                "restart mining backend",
+                (backend.async_restart_backend() for backend in backends),
             )
 
     async def set_work_mode(call: ServiceCall) -> None:
@@ -60,8 +74,9 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         backends = get_backends(call)
         if backends:
             mode = call.data["mode"]
-            await asyncio.gather(
-                *(backend.async_set_power_mode(mode) for backend in backends)
+            await _async_gather_backend_calls(
+                "set work mode",
+                (backend.async_set_power_mode(mode) for backend in backends),
             )
 
     hass.services.async_register(DOMAIN, SERVICE_REBOOT, reboot)

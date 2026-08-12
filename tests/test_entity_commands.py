@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.miner.button import MinerCommandButton
 from custom_components.miner.switch import MinerActiveSwitch
@@ -99,7 +100,7 @@ async def test_switch_does_not_refresh_when_command_fails() -> None:
     coordinator = FakeCoordinator(FailingBackend())
     entity = _generic_switch_entity(coordinator)
 
-    with pytest.raises(RuntimeError, match="rejected"):
+    with pytest.raises(HomeAssistantError, match="rejected"):
         await MinerActiveSwitch.async_turn_on(entity)
 
     assert coordinator.refreshes == 0

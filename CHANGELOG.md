@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.7] - 2026-08-12
+
+### Fixed
+
+- Entity/service command handlers (`switch.py`, `number.py`, `button.py`,
+  `services.py`) now catch backend failures and re-raise them as
+  `homeassistant.exceptions.HomeAssistantError` instead of letting raw
+  `RuntimeError`/`BackendError` propagate. Live diagnosis showed that Home
+  Assistant's automation `continue_on_error: true` only suppresses
+  `HomeAssistantError` subclasses (see `helpers/script.py`
+  `_handle_exception`); a raw `RuntimeError` from a failed `async_resume()`
+  call (e.g. the S9 not yet acknowledging a command right after a power-limit
+  change) still aborted the entire calling automation even with
+  `continue_on_error` set on the triggering action. Backend-internal
+  exception types in `backends/base.py`/`backends/*.py` are intentionally
+  left untouched (plain `Exception`-based) to keep backend unit tests free of
+  a Home Assistant runtime dependency; the conversion now happens only at the
+  entity/service boundary, which already imports Home Assistant.
+
 ## [2.0.6] - 2026-08-12
 
 ### Added

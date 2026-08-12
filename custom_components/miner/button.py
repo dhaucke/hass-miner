@@ -9,6 +9,7 @@ from homeassistant.components.button import ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import DOMAIN
@@ -86,5 +87,12 @@ class MinerCommandButton(MinerEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Execute the backend command and refresh miner state."""
-        await self._command()
+        try:
+            await self._command()
+        except HomeAssistantError:
+            raise
+        except Exception as err:
+            raise HomeAssistantError(
+                f"Failed to execute {self.entity_description.key}: {err}"
+            ) from err
         await self.coordinator.async_request_refresh()

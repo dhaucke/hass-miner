@@ -9,6 +9,7 @@ from homeassistant.components.sensor import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfPower
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -83,7 +84,7 @@ class MinerPowerLimitNumber(MinerEntity, NumberEntity):
         """Set the miner power limit through the active backend."""
         backend = self.coordinator.backend
         if backend is None:
-            raise RuntimeError("Miner backend is not available")
+            raise HomeAssistantError("Miner backend is not available")
 
         requested = int(value)
         _LOGGER.debug(
@@ -92,7 +93,12 @@ class MinerPowerLimitNumber(MinerEntity, NumberEntity):
             requested,
             backend.kind.value,
         )
-        await backend.async_set_power_limit(requested)
+        try:
+            await backend.async_set_power_limit(requested)
+        except HomeAssistantError:
+            raise
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to set power limit: {err}") from err
         await self.coordinator.async_request_refresh()
 
     @callback

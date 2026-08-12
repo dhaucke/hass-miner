@@ -7,6 +7,7 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .backends.base import BackendKind
@@ -71,18 +72,18 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
             return True
         if _BOSMINER_STOPPED_MARKER in result:
             return False
-        raise RuntimeError("Unable to determine BOSMiner process state over SSH")
+        raise HomeAssistantError("Unable to determine BOSMiner process state over SSH")
 
     async def _async_set_bosminer_service(self, running: bool) -> None:
         """Start or stop BOSMiner through SSH and wait for the requested state."""
         backend = self.coordinator.backend
         if backend is None:
-            raise RuntimeError("Miner backend is not available")
+            raise HomeAssistantError("Miner backend is not available")
 
         miner = getattr(backend, "miner", None)
         ssh = getattr(miner, "ssh", None)
         if ssh is None:
-            raise RuntimeError("SSH is not available for BOSMiner service control")
+            raise HomeAssistantError("SSH is not available for BOSMiner service control")
 
         action = "start" if running else "stop"
         requested_state = "running" if running else "stopped"
@@ -100,9 +101,15 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
                     while await self._async_bosminer_is_running(ssh) != running:
                         await asyncio.sleep(BOSMINER_STATE_POLL_INTERVAL_SECONDS)
         except TimeoutError as err:
-            raise RuntimeError(
+            raise HomeAssistantError(
                 f"BOSMiner did not reach the requested {requested_state} state "
                 f"within {BOSMINER_CONTROL_TIMEOUT_SECONDS:g}s"
+            ) from err
+        except HomeAssistantError:
+            raise
+        except Exception as err:
+            raise HomeAssistantError(
+                f"Failed to set BOSMiner service to {requested_state}: {err}"
             ) from err
 
         # Do not synchronously refresh here. A stopped BOSMiner has no telemetry,
@@ -116,7 +123,7 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
         """Resume mining or start legacy BOSMiner and then refresh actual state."""
         backend = self.coordinator.backend
         if backend is None:
-            raise RuntimeError("Miner backend is not available")
+            raise HomeAssistantError("Miner backend is not available")
 
         _LOGGER.debug(
             "%s: activate mining through %s backend",
@@ -127,14 +134,19 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
             await self._async_set_bosminer_service(True)
             return
 
-        await backend.async_resume()
+        try:
+            await backend.async_resume()
+        except HomeAssistantError:
+            raise
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to resume mining: {err}") from err
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self) -> None:
         """Pause mining or stop legacy BOSMiner and then refresh actual state."""
         backend = self.coordinator.backend
         if backend is None:
-            raise RuntimeError("Miner backend is not available")
+            raise HomeAssistantError("Miner backend is not available")
 
         _LOGGER.debug(
             "%s: deactivate mining through %s backend",
@@ -145,7 +157,12 @@ class MinerActiveSwitch(MinerEntity, SwitchEntity):
             await self._async_set_bosminer_service(False)
             return
 
-        await backend.async_pause()
+        try:
+            await backend.async_pause()
+        except HomeAssistantError:
+            raise
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to pause mining: {err}") from err
         await self.coordinator.async_request_refresh()
 
     @callback
