@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.11] - 2026-08-12
+
+### Fixed
+
+- Update `.pre-commit-config.yaml` hook revisions, carried over unchanged
+  from the original fork and badly stale: `ruff-pre-commit` was pinned to
+  `v0.0.275` while `requirements.txt` requires `ruff>=0.12.5` -- two
+  incompatible Ruff generations -- so running pre-commit locally could lint
+  against different rules than actual CI/dev tooling. Bumped
+  `pre-commit-hooks` to v6.0.0, `ruff-pre-commit` to v0.16.2, `black` to
+  26.5.1, `reorder_python_imports` to v3.17.0, `mirrors-prettier` to v3.1.0.
+- Add `.venv`/`venv` to `.gitignore` explicitly instead of relying only on
+  the auto-generated `.gitignore` stub inside a created virtualenv.
+
 ## [2.0.10] - 2026-08-12
 
 ### Added
