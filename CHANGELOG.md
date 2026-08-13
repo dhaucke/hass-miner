@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.13] - 2026-08-13
+
+### Fixed
+
+- Legacy Braiins S9 backend: `miner.resume`/pause could fail with "Miner
+  did not acknowledge resume/pause request", caught live via a real
+  automation failure right after the board-hashrate fix in 2.0.12 -- same
+  root cause. pyasic's own `resume_mining()`/`stop_mining()` resolve this
+  legacy device to a web/gRPC-based handler built for newer BraiinsOS+
+  firmware, which has no endpoint here and silently returns failure.
+  `async_pause`/`async_resume` are now implemented directly against the
+  legacy `pause`/`resume` RPC commands (same RPC channel `temps`/`devs`
+  already use successfully), instead of relying on pyasic's generic,
+  auto-detected implementation.
+
 ## [2.0.12] - 2026-08-13
 
 ### Fixed

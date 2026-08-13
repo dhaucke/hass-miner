@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import replace
 
 from .base import BackendKind
+from .base import BackendUnsupportedError
 from .base import FanData
 from .base import HashboardData
 from .base import MinerCapabilities
@@ -598,3 +599,39 @@ class BraiinsLegacyS9Backend(PyasicBackend):
                     "Power target update failed and automatic rollback could not be verified"
                 ) from rollback_err
             raise write_err
+
+    async def async_pause(self) -> None:
+        """Pause mining via BOSer's legacy pause RPC.
+
+        pyasic's own stop_mining() resolves this device to a web/gRPC-based
+        handler built for newer BraiinsOS+ firmware, which has no endpoint
+        on this old firmware and silently fails - the same root cause as
+        the board-hashrate bug this backend already works around. Send the
+        legacy cgminer-style RPC command directly instead, the same RPC
+        channel temps/devs already use successfully.
+        """
+        if not self.capabilities.pause_resume:
+            raise BackendUnsupportedError("Pause/resume is not supported")
+        rpc = getattr(self.miner, "rpc", None)
+        if rpc is None or not hasattr(rpc, "pause"):
+            raise RuntimeError("Miner did not acknowledge pause request")
+        try:
+            data = await rpc.pause()
+        except Exception as err:
+            raise RuntimeError("Miner did not acknowledge pause request") from err
+        if not (isinstance(data, dict) and data.get("PAUSE") and data["PAUSE"][0]):
+            raise RuntimeError("Miner did not acknowledge pause request")
+
+    async def async_resume(self) -> None:
+        """Resume mining via BOSer's legacy resume RPC (see async_pause)."""
+        if not self.capabilities.pause_resume:
+            raise BackendUnsupportedError("Pause/resume is not supported")
+        rpc = getattr(self.miner, "rpc", None)
+        if rpc is None or not hasattr(rpc, "resume"):
+            raise RuntimeError("Miner did not acknowledge resume request")
+        try:
+            data = await rpc.resume()
+        except Exception as err:
+            raise RuntimeError("Miner did not acknowledge resume request") from err
+        if not (isinstance(data, dict) and data.get("RESUME") and data["RESUME"][0]):
+            raise RuntimeError("Miner did not acknowledge resume request")

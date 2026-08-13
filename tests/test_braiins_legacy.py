@@ -405,3 +405,81 @@ async def test_power_write_rolls_back_when_restart_fails(monkeypatch) -> None:
     assert ssh.current == VALID_CONFIG
     assert ssh.backup == VALID_CONFIG
     assert ssh.restart_calls == 2
+
+
+def _pause_resume_backend() -> BraiinsLegacyS9Backend:
+    """Build a backend with pause/resume capability enabled, no RPC wired yet."""
+    miner = SimpleNamespace(
+        supports_autotuning=True,
+        supports_shutdown=True,
+        supports_power_modes=False,
+        expected_fans=0,
+        expected_hashboards=0,
+    )
+    return BraiinsLegacyS9Backend(miner)
+
+
+@pytest.mark.asyncio
+async def test_async_pause_uses_legacy_rpc_not_pyasics_broken_web_api() -> None:
+    """Regression: pyasic's stop_mining() silently fails on this device.
+
+    pyasic resolves this legacy device to a web/gRPC handler with no
+    endpoint on old firmware. Pausing must go through the same legacy RPC
+    channel temps/devs already use successfully.
+    """
+    calls: list[str] = []
+
+    class FakeRPC:
+        async def pause(self):
+            calls.append("pause")
+            return {"PAUSE": [{"STATUS": "S", "Msg": "Pausing"}]}
+
+    backend = _pause_resume_backend()
+    backend.miner.rpc = FakeRPC()
+
+    await backend.async_pause()
+
+    assert calls == ["pause"]
+
+
+@pytest.mark.asyncio
+async def test_async_resume_uses_legacy_rpc_not_pyasics_broken_web_api() -> None:
+    """Same regression as async_pause, for the resume direction."""
+    calls: list[str] = []
+
+    class FakeRPC:
+        async def resume(self):
+            calls.append("resume")
+            return {"RESUME": [{"STATUS": "S", "Msg": "Resuming"}]}
+
+    backend = _pause_resume_backend()
+    backend.miner.rpc = FakeRPC()
+
+    await backend.async_resume()
+
+    assert calls == ["resume"]
+
+
+@pytest.mark.asyncio
+async def test_async_resume_raises_when_legacy_rpc_does_not_acknowledge() -> None:
+    """A negative/empty RPC acknowledgement must still surface as an error."""
+
+    class FakeRPC:
+        async def resume(self):
+            return {"RESUME": []}
+
+    backend = _pause_resume_backend()
+    backend.miner.rpc = FakeRPC()
+
+    with pytest.raises(RuntimeError, match="did not acknowledge resume request"):
+        await backend.async_resume()
+
+
+@pytest.mark.asyncio
+async def test_async_resume_raises_when_no_rpc_is_available() -> None:
+    """No rpc object at all must fail loudly instead of silently no-op'ing."""
+    backend = _pause_resume_backend()
+    backend.miner.rpc = None
+
+    with pytest.raises(RuntimeError, match="did not acknowledge resume request"):
+        await backend.async_resume()
