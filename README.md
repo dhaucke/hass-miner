@@ -7,11 +7,11 @@
 [![Release](https://img.shields.io/github/v/release/dhaucke/hass-miner?style=flat-square)](https://github.com/dhaucke/hass-miner/releases/latest)
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5?style=flat-square)](https://github.com/hacs/integration)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-18BCF2?style=flat-square)](https://www.home-assistant.io/)
-[![License](https://img.shields.io/github/license/dhaucke/hass-miner?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/github/license/dhaucke/hass-miner?style=flat-square)](https://github.com/dhaucke/hass-miner/blob/main/LICENSE)
 
 **Hashrate · Temperaturen · Leistung · Effizienz · Lüfter · Mining-Steuerung · Leistungslimits**
 
-[Mit HACS installieren](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration) · [Unterstützte Miner](SUPPORTED_MINERS.md) · [Problem melden](https://github.com/dhaucke/hass-miner/issues)
+[Mit HACS installieren](https://my.home-assistant.io/redirect/hacs_repository/?owner=dhaucke&repository=hass-miner&category=integration) · [Unterstützte Miner](https://github.com/dhaucke/hass-miner/blob/main/SUPPORTED_MINERS.md) · [Problem melden](https://github.com/dhaucke/hass-miner/issues)
 
 **Sprache:** [Deutsch](#deutsch) · [English](#english)
 
@@ -63,7 +63,7 @@ Legacy BOSer/BOSMiner kann zeitweise keine Lüfterdrehzahlen zurückgeben, obwoh
 
 Andere von pyasic unterstützte Miner verwenden das generische Kompatibilitäts-Backend. Eine erfolgreiche Erkennung bedeutet **nicht**, dass jede firmware-spezifische Schreiboperation für dieses Projekt separat validiert wurde.
 
-Siehe **[SUPPORTED_MINERS.md](SUPPORTED_MINERS.md)** für den aktuellen Unterstützungsstatus und Hardwarehinweise.
+Siehe **[SUPPORTED_MINERS.md](https://github.com/dhaucke/hass-miner/blob/main/SUPPORTED_MINERS.md)** für den aktuellen Unterstützungsstatus und Hardwarehinweise.
 
 ---
 
@@ -134,7 +134,7 @@ HACS-Validierung und hassfest laufen über GitHub Actions.
 
 ## Credits & Lizenz
 
-Miner wird unter der [MIT-Lizenz](LICENSE) veröffentlicht.
+Miner wird unter der [MIT-Lizenz](https://github.com/dhaucke/hass-miner/blob/main/LICENSE) veröffentlicht.
 
 Dieses Repository ist ein Fork und eine umfassende Überarbeitung des ursprünglichen Projekts `Schnitzel/hass-miner`. Der ursprüngliche MIT-Copyright-Hinweis bleibt in der Projekthistorie erhalten.
 
@@ -188,7 +188,7 @@ Legacy BOSer/BOSMiner can intermittently stop returning fan RPM even while minin
 
 Other miners supported by pyasic use the generic compatibility backend. Detection does **not** mean that every firmware-specific write operation has been independently validated by this project.
 
-See **[SUPPORTED_MINERS.md](SUPPORTED_MINERS.md)** for the current support levels and hardware notes.
+See **[SUPPORTED_MINERS.md](https://github.com/dhaucke/hass-miner/blob/main/SUPPORTED_MINERS.md)** for the current support levels and hardware notes.
 
 ---
 
@@ -259,7 +259,7 @@ HACS validation and hassfest run in GitHub Actions.
 
 ## Credits & license
 
-Miner is released under the [MIT License](LICENSE).
+Miner is released under the [MIT License](https://github.com/dhaucke/hass-miner/blob/main/LICENSE).
 
 This repository is a fork and substantial rework of the original `Schnitzel/hass-miner` project. The original MIT copyright notice is preserved in the project history.
 
