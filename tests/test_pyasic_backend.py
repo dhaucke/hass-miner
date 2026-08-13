@@ -84,3 +84,153 @@ def test_efficiency_uses_normalized_ths() -> None:
     assert _efficiency_jth(813, 2.6006742805167) == pytest.approx(312.61)
     assert _efficiency_jth(0, 0) == 0.0
     assert _efficiency_jth(None, 10) is None
+
+
+def _legacy_bosminer(**overrides) -> BOSMiner:
+    """Build a BOSMiner-typed miner with pause/reboot capabilities, no RPC/SSH."""
+    defaults = {
+        "supports_autotuning": True,
+        "supports_shutdown": True,
+        "supports_power_modes": False,
+        "expected_fans": 0,
+        "expected_hashboards": 0,
+        "reboot": lambda: None,
+        "restart_backend": lambda: None,
+    }
+    defaults.update(overrides)
+    return BOSMiner(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_async_resume_falls_back_to_legacy_rpc_when_pyasic_call_fails() -> None:
+    """Regression: seen live on a real S9 between validated-SSH windows.
+
+    pyasic's resume_mining() resolves this legacy device to a web/gRPC
+    handler with no endpoint on old firmware and returns False; the legacy
+    cgminer-style RPC (the same channel board/chip temperature reads
+    already use) must be tried next instead of surfacing a false failure.
+    """
+    calls: list[str] = []
+
+    class FakeRPC:
+        async def resume(self):
+            calls.append("resume")
+            return {"RESUME": [{"STATUS": "S"}]}
+
+    async def failing_resume_mining():
+        return False
+
+    miner = _legacy_bosminer(resume_mining=failing_resume_mining, rpc=FakeRPC())
+    backend = PyasicBackend(miner)
+
+    await backend.async_resume()
+
+    assert calls == ["resume"]
+
+
+@pytest.mark.asyncio
+async def test_async_pause_falls_back_to_legacy_rpc_when_pyasic_call_fails() -> None:
+    """Same regression as resume, for pause."""
+    calls: list[str] = []
+
+    class FakeRPC:
+        async def pause(self):
+            calls.append("pause")
+            return {"PAUSE": [{"STATUS": "S"}]}
+
+    async def failing_stop_mining():
+        return False
+
+    miner = _legacy_bosminer(stop_mining=failing_stop_mining, rpc=FakeRPC())
+    backend = PyasicBackend(miner)
+
+    await backend.async_pause()
+
+    assert calls == ["pause"]
+
+
+@pytest.mark.asyncio
+async def test_async_reboot_falls_back_to_ssh_when_pyasic_call_fails() -> None:
+    """Same regression class as resume/pause, for reboot."""
+    calls: list[str] = []
+
+    class FakeSSH:
+        async def send_command(self, command: str) -> str:
+            calls.append(command)
+            return "ok"
+
+    async def failing_reboot():
+        return False
+
+    miner = _legacy_bosminer(reboot=failing_reboot, ssh=FakeSSH())
+    backend = PyasicBackend(miner)
+
+    await backend.async_reboot()
+
+    assert calls == ["/sbin/reboot"]
+
+
+@pytest.mark.asyncio
+async def test_async_restart_backend_falls_back_to_ssh_when_pyasic_call_fails() -> None:
+    """Same regression class as resume/pause/reboot, for backend restart."""
+    calls: list[str] = []
+
+    class FakeSSH:
+        async def send_command(self, command: str) -> str:
+            calls.append(command)
+            return "__HASS_MINER_GENERIC_RESTART_OK__\n"
+
+    async def failing_restart_backend():
+        return False
+
+    miner = _legacy_bosminer(restart_backend=failing_restart_backend, ssh=FakeSSH())
+    backend = PyasicBackend(miner)
+
+    await backend.async_restart_backend()
+
+    assert len(calls) == 1
+    assert "bosminer reload" in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_async_resume_still_raises_when_legacy_fallback_also_fails() -> None:
+    """A genuine double failure must still surface as an error, not a no-op."""
+
+    class FakeRPC:
+        async def resume(self):
+            return {"RESUME": []}
+
+    async def failing_resume_mining():
+        return False
+
+    miner = _legacy_bosminer(resume_mining=failing_resume_mining, rpc=FakeRPC())
+    backend = PyasicBackend(miner)
+
+    with pytest.raises(RuntimeError, match="did not acknowledge resume request"):
+        await backend.async_resume()
+
+
+@pytest.mark.asyncio
+async def test_async_resume_does_not_fall_back_for_non_bosminer_devices() -> None:
+    """The legacy RPC fallback must only ever apply to BOSMiner-typed miners."""
+    calls: list[str] = []
+
+    class FakeRPC:
+        async def resume(self):
+            calls.append("resume")
+            return {"RESUME": [{"STATUS": "S"}]}
+
+    async def failing_resume_mining():
+        return False
+
+    miner = SimpleNamespace(
+        supports_shutdown=True,
+        resume_mining=failing_resume_mining,
+        rpc=FakeRPC(),
+    )
+    backend = PyasicBackend(miner)
+
+    with pytest.raises(RuntimeError, match="did not acknowledge resume request"):
+        await backend.async_resume()
+
+    assert calls == []

@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.15] - 2026-08-13
+
+### Fixed
+
+- The 2.0.13/2.0.14 pause/resume/reboot/restart_backend fixes only lived
+  in the validated SSH backend (braiins_legacy) - but this S9 keeps
+  oscillating between that backend and the generic pyasic one between
+  upgrade-retry windows (`MinerCoordinator._async_maybe_upgrade_backend`,
+  every 5 minutes), and a real automation call landed exactly while on
+  the generic backend, failing with the same "Miner did not acknowledge
+  resume request" the 2.0.13 fix was supposed to have already solved.
+  The generic `PyasicBackend.async_pause`/`async_resume`/`async_reboot`/
+  `async_restart_backend` now fall back to the same legacy cgminer-RPC/SSH
+  commands whenever the connected miner is a legacy BOSMiner device and
+  pyasic's own (broken, newer-firmware-oriented) call returns false -
+  regardless of which backend is currently selected, closing the gap
+  between the two fixes instead of only patching the validated one.
+
 ## [2.0.14] - 2026-08-13
 
 ### Fixed

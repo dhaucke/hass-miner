@@ -199,12 +199,50 @@ class PyasicBackend:
         if not result:
             raise RuntimeError("pyasic failed to set the requested power limit")
 
+    async def _legacy_bosminer_rpc(self, command: str, key: str) -> bool:
+        """Send a legacy cgminer-style RPC command directly and check its ack.
+
+        pyasic's high-level stop_mining/resume_mining resolve legacy
+        BOSMiner devices (this same "generic" backend also covers a
+        legacy S9 before/between validated-SSH windows - see
+        MinerCoordinator._async_maybe_upgrade_backend) to handlers built
+        for newer BraiinsOS+ firmware (web/gRPC), which silently return
+        False against old firmware instead of raising. Fall back to the
+        same legacy RPC channel board/chip temperature reads already use
+        successfully, rather than surfacing a false negative here.
+        """
+        rpc = getattr(self.miner, "rpc", None)
+        if rpc is None or not hasattr(rpc, command):
+            return False
+        try:
+            data = await getattr(rpc, command)()
+        except Exception:
+            return False
+        return isinstance(data, dict) and bool(data.get(key)) and bool(data[key][0])
+
+    async def _legacy_bosminer_ssh(self, command: str) -> str | None:
+        """Send a raw command over the legacy BOSMiner SSH transport, if any.
+
+        Same rationale as ``_legacy_bosminer_rpc``, for reboot/backend
+        restart, which pyasic exposes only through the same broken
+        newer-firmware handler for this device family.
+        """
+        ssh = getattr(self.miner, "ssh", None)
+        if ssh is None:
+            return None
+        try:
+            return await ssh.send_command(command)
+        except Exception:
+            return None
+
     async def async_pause(self) -> None:
         """Pause mining."""
         if not self.capabilities.pause_resume:
             raise BackendUnsupportedError("Pause/resume is not supported")
         result = await self.miner.stop_mining()
-        if result is False:
+        if result is False and self._unsafe_bosminer_config_writes:
+            result = await self._legacy_bosminer_rpc("pause", "PAUSE")
+        if not result:
             raise RuntimeError("Miner did not acknowledge pause request")
 
     async def async_resume(self) -> None:
@@ -212,7 +250,9 @@ class PyasicBackend:
         if not self.capabilities.pause_resume:
             raise BackendUnsupportedError("Pause/resume is not supported")
         result = await self.miner.resume_mining()
-        if result is False:
+        if result is False and self._unsafe_bosminer_config_writes:
+            result = await self._legacy_bosminer_rpc("resume", "RESUME")
+        if not result:
             raise RuntimeError("Miner did not acknowledge resume request")
 
     async def async_reboot(self) -> None:
@@ -220,7 +260,9 @@ class PyasicBackend:
         if not self.capabilities.reboot:
             raise BackendUnsupportedError("Reboot is not supported")
         result = await self.miner.reboot()
-        if result is False:
+        if result is False and self._unsafe_bosminer_config_writes:
+            result = await self._legacy_bosminer_ssh("/sbin/reboot")
+        if not result:
             raise RuntimeError("Miner did not acknowledge reboot request")
 
     async def async_restart_backend(self) -> None:
@@ -228,7 +270,13 @@ class PyasicBackend:
         if not self.capabilities.restart_backend:
             raise BackendUnsupportedError("Backend restart is not supported")
         result = await self.miner.restart_backend()
-        if result is False:
+        if result is False and self._unsafe_bosminer_config_writes:
+            marker = "__HASS_MINER_GENERIC_RESTART_OK__"
+            raw = await self._legacy_bosminer_ssh(
+                f"/etc/init.d/bosminer reload && echo {marker}"
+            )
+            result = raw is not None and marker in raw
+        if not result:
             raise RuntimeError("Miner did not acknowledge backend restart request")
 
     async def async_set_power_mode(self, mode: str) -> None:
