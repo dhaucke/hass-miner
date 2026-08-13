@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.12] - 2026-08-13
+
+### Fixed
+
+- Legacy Braiins S9 backend: per-board hashrate sensors always showed
+  "unknown", even though the aggregate hashrate sensor and the other
+  per-board sensors (temperature, chip temperature) worked correctly.
+  Root cause: pyasic's generic snapshot resolves this device to a hashboard
+  reader built for newer BraiinsOS+ firmware (a web/gRPC endpoint), which
+  doesn't exist on this old firmware and silently returns no hashrate.
+  Board temperature/chip temperature already bypassed this by reading the
+  authoritative legacy `temps` RPC directly over SSH; board hashrate now
+  does the same via the legacy `devs` RPC (same data source pyasic's own
+  legacy-BOSMiner code path already knows how to parse, just never reached
+  for this device/firmware combination).
+
+### Test
+
+- Added regression tests for the `devs` RPC parser and the merged
+  hashboard snapshot, based on a real Antminer S9's BOSer response shape.
+- Fixed `tests/test_pyasic_backend.py` failing to even collect (pre-existing,
+  unrelated to this fix): a class-level method returned its own enclosing
+  class as a forward-referenced type hint without
+  `from __future__ import annotations`, raising `NameError` at import time.
+
 ## [2.0.11] - 2026-08-12
 
 ### Fixed

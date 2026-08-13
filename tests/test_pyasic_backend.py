@@ -1,5 +1,7 @@
 """Safety and telemetry tests for the generic pyasic compatibility backend."""
 
+from __future__ import annotations
+
 from types import SimpleNamespace
 
 import pytest

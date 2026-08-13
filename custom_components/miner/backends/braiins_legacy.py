@@ -162,6 +162,40 @@ def _s9_hashboards_from_temps(rpc_temps: object) -> tuple[HashboardData, ...]:
     return tuple(sorted(boards, key=lambda board: board.slot))
 
 
+def _s9_hashrates_from_devs(rpc_devs: object) -> dict[int, float]:
+    """Parse per-board hashrate (TH/s) from BOSer's legacy ``devs`` response.
+
+    Mirrors pyasic's own legacy-BOSMiner ``_get_hashboards`` parsing (same
+    "devs" RPC, same ID-to-slot offset), because pyasic's *generic* snapshot
+    used elsewhere in this backend resolves this device to its modern
+    web/gRPC-API hashboard reader, which has no endpoint on this old
+    firmware and silently returns no hashrate. Reading it ourselves via the
+    same legacy cgminer-style RPC that already supplies temperatures avoids
+    depending on pyasic's class auto-detection for this one field.
+    """
+    if not isinstance(rpc_devs, dict):
+        return {}
+    rows = rpc_devs.get("DEVS")
+    if not isinstance(rows, list) or not rows:
+        return {}
+
+    first_row = rows[0]
+    first_id = first_row.get("ID") if isinstance(first_row, dict) else None
+    offset = 6 if isinstance(first_id, int) and first_id in (6, 7, 8) else 1
+
+    hashrates: dict[int, float] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_id = row.get("ID")
+        raw_mhs = row.get("MHS 1m")
+        if not isinstance(raw_id, int) or not isinstance(raw_mhs, (int, float)):
+            continue
+        hashrates[raw_id - offset] = float(raw_mhs) / 1_000_000
+
+    return hashrates
+
+
 def _s9_fans_from_rpc(rpc_fans: object) -> tuple[FanData, ...]:
     """Return populated S9 fans from BOSer's legacy ``fans`` response."""
     if not isinstance(rpc_fans, dict):
@@ -188,31 +222,43 @@ def _s9_fans_from_rpc(rpc_fans: object) -> tuple[FanData, ...]:
 
 def _merge_hashboards(
     primary: tuple[HashboardData, ...],
-    temperatures: tuple[HashboardData, ...],
+    boser: tuple[HashboardData, ...],
 ) -> tuple[HashboardData, ...]:
-    """Merge pyasic hashrates with authoritative BOSer board temperatures."""
+    """Merge pyasic hashboards with authoritative BOSer temps/devs readings.
+
+    ``boser`` wins whenever it has a value for a field: pyasic's generic
+    snapshot resolves this legacy device to handlers built for newer
+    firmware (web/gRPC for hashrate, a different topology for temps) that
+    silently return nothing here. ``primary`` (pyasic) is only a fallback
+    for whichever fields ``boser`` doesn't have.
+    """
     primary_by_slot = {board.slot: board for board in primary}
-    temperatures_by_slot = {board.slot: board for board in temperatures}
-    slots = sorted(primary_by_slot.keys() | temperatures_by_slot.keys())
+    boser_by_slot = {board.slot: board for board in boser}
+    slots = sorted(primary_by_slot.keys() | boser_by_slot.keys())
 
     merged: list[HashboardData] = []
     for slot in slots:
         current = primary_by_slot.get(slot)
-        temp = temperatures_by_slot.get(slot)
+        authoritative = boser_by_slot.get(slot)
         merged.append(
             HashboardData(
                 slot=slot,
                 temperature=(
-                    temp.temperature
-                    if temp is not None and temp.temperature is not None
+                    authoritative.temperature
+                    if authoritative is not None and authoritative.temperature is not None
                     else current.temperature if current is not None else None
                 ),
                 chip_temperature=(
-                    temp.chip_temperature
-                    if temp is not None and temp.chip_temperature is not None
+                    authoritative.chip_temperature
+                    if authoritative is not None
+                    and authoritative.chip_temperature is not None
                     else current.chip_temperature if current is not None else None
                 ),
-                hashrate=current.hashrate if current is not None else None,
+                hashrate=(
+                    authoritative.hashrate
+                    if authoritative is not None and authoritative.hashrate is not None
+                    else current.hashrate if current is not None else None
+                ),
             )
         )
     return tuple(merged)
@@ -299,14 +345,29 @@ class BraiinsLegacyS9Backend(PyasicBackend):
         self._identity_validated = True
 
     async def _read_s9_hashboards(self) -> tuple[HashboardData, ...]:
-        """Read real S9 board/chip temperatures from BOSer's read-only temps RPC."""
+        """Read real S9 board/chip temperatures and hashrate from BOSer's read-only RPCs."""
         rpc = getattr(self.miner, "rpc", None)
         if rpc is None or not hasattr(rpc, "temps"):
             return ()
         try:
-            return _s9_hashboards_from_temps(await rpc.temps())
+            boards = _s9_hashboards_from_temps(await rpc.temps())
         except Exception:
             return ()
+
+        hashrates: dict[int, float] = {}
+        if hasattr(rpc, "devs"):
+            try:
+                hashrates = _s9_hashrates_from_devs(await rpc.devs())
+            except Exception:
+                hashrates = {}
+
+        if not hashrates:
+            return boards
+
+        return tuple(
+            replace(board, hashrate=hashrates.get(board.slot, board.hashrate))
+            for board in boards
+        )
 
     async def _read_s9_fans(self) -> tuple[FanData, ...]:
         """Read populated S9 fans from BOSer's read-only fans RPC."""
