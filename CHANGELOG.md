@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+Versioning switched from semver (`2.0.x`) to calendar versioning
+(`YYYY.MM.PATCH`) starting with 2026.8.1, matching this maintainer's
+other forks (dhaucke/miele). No functional change - existing `v2.0.x`
+tags/releases are kept as-is for history.
+
+## [2026.8.1] - 2026-08-13
+
+### Changed
+
+- Switched version scheme to calendar versioning (see above). No code
+  changes.
+
 ## [2.0.15] - 2026-08-13
 
 ### Fixed
