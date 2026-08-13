@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.14] - 2026-08-13
+
+### Fixed
+
+- Proactive fix for the same bug class as 2.0.13, before it could fail
+  live like pause/resume did: the "Neu starten" (reboot) and
+  "Mining-Backend neu starten" (restart_backend) buttons on the legacy
+  Braiins S9 backend were still calling pyasic's own reboot()/
+  restart_backend(), which resolve this device to the same broken
+  web/gRPC handler as resume_mining()/stop_mining() did. Both are now
+  implemented directly over SSH: reboot sends `/sbin/reboot` directly
+  (same transport already used for identity validation and power-limit
+  writes), and restart_backend reuses the already-proven BOSMiner
+  reload-and-wait-for-recovery path from the power-limit write flow.
+
 ## [2.0.13] - 2026-08-13
 
 ### Fixed

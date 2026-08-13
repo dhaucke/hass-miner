@@ -408,13 +408,21 @@ async def test_power_write_rolls_back_when_restart_fails(monkeypatch) -> None:
 
 
 def _pause_resume_backend() -> BraiinsLegacyS9Backend:
-    """Build a backend with pause/resume capability enabled, no RPC wired yet."""
+    """Build a backend with all write capabilities enabled, no RPC/SSH wired yet.
+
+    reboot/restart_backend are unused no-op attributes, only present so
+    pyasic_backend.PyasicBackend.capabilities' hasattr() checks see them as
+    supported - the real implementation never calls them, it goes through
+    SSH directly.
+    """
     miner = SimpleNamespace(
         supports_autotuning=True,
         supports_shutdown=True,
         supports_power_modes=False,
         expected_fans=0,
         expected_hashboards=0,
+        reboot=lambda: None,
+        restart_backend=lambda: None,
     )
     return BraiinsLegacyS9Backend(miner)
 
@@ -483,3 +491,54 @@ async def test_async_resume_raises_when_no_rpc_is_available() -> None:
 
     with pytest.raises(RuntimeError, match="did not acknowledge resume request"):
         await backend.async_resume()
+
+
+@pytest.mark.asyncio
+async def test_async_reboot_uses_ssh_not_pyasics_broken_web_api() -> None:
+    """Same regression class as async_pause/async_resume, for reboot."""
+    calls: list[str] = []
+
+    class FakeSSHReboot:
+        async def send_command(self, command: str) -> str:
+            calls.append(command)
+            return "ok"
+
+    backend = _pause_resume_backend()
+    backend.miner.ssh = FakeSSHReboot()
+
+    await backend.async_reboot()
+
+    assert calls == ["/sbin/reboot"]
+
+
+@pytest.mark.asyncio
+async def test_async_reboot_raises_when_no_ssh_is_available() -> None:
+    """No ssh object at all must fail loudly instead of silently no-op'ing."""
+    backend = _pause_resume_backend()
+    backend.miner.ssh = None
+
+    with pytest.raises(RuntimeError, match="did not acknowledge reboot request"):
+        await backend.async_reboot()
+
+
+@pytest.mark.asyncio
+async def test_async_restart_backend_reloads_and_waits_for_recovery(
+    monkeypatch,
+) -> None:
+    """restart_backend must reuse the already-proven reload+recovery path."""
+    calls: list[str] = []
+
+    async def fake_restart(_self) -> None:
+        calls.append("restart")
+
+    async def fake_wait(_self, **_kwargs) -> None:
+        calls.append("wait")
+
+    monkeypatch.setattr(BraiinsLegacyS9Backend, "_restart_bosminer", fake_restart)
+    monkeypatch.setattr(BraiinsLegacyS9Backend, "_wait_for_bosminer", fake_wait)
+
+    backend = _pause_resume_backend()
+
+    await backend.async_restart_backend()
+
+    assert calls == ["restart", "wait"]

@@ -635,3 +635,31 @@ class BraiinsLegacyS9Backend(PyasicBackend):
             raise RuntimeError("Miner did not acknowledge resume request") from err
         if not (isinstance(data, dict) and data.get("RESUME") and data["RESUME"][0]):
             raise RuntimeError("Miner did not acknowledge resume request")
+
+    async def async_reboot(self) -> None:
+        """Reboot the S9 via BOSer's SSH reboot command.
+
+        pyasic's own reboot() resolves this legacy device to a web/gRPC
+        handler with no endpoint on old firmware - same root cause as
+        async_pause/async_resume. Send the reboot command directly over
+        SSH instead, the same transport already used for identity
+        validation and power-limit writes.
+        """
+        if not self.capabilities.reboot:
+            raise BackendUnsupportedError("Reboot is not supported")
+        ssh = getattr(self.miner, "ssh", None)
+        if ssh is None:
+            raise RuntimeError("Miner did not acknowledge reboot request")
+        try:
+            result = await ssh.send_command("/sbin/reboot")
+        except Exception as err:
+            raise RuntimeError("Miner did not acknowledge reboot request") from err
+        if not result:
+            raise RuntimeError("Miner did not acknowledge reboot request")
+
+    async def async_restart_backend(self) -> None:
+        """Restart BOSMiner and wait for telemetry to recover (see async_reboot)."""
+        if not self.capabilities.restart_backend:
+            raise BackendUnsupportedError("Backend restart is not supported")
+        await self._restart_bosminer()
+        await self._wait_for_bosminer()
