@@ -9,6 +9,19 @@ Versioning switched from semver (`2.0.x`) to calendar versioning
 other forks (dhaucke/miele). No functional change - existing `v2.0.x`
 tags/releases are kept as-is for history.
 
+## [2026.8.3] - 2026-08-15
+
+### Fixed
+
+- `pyasic==0.79.0` pins `betterproto==2.0.0b7` exactly, a prerelease.
+  HA installs requirements via `uv`, which refuses a prerelease that is
+  only pulled in transitively (even with an exact version pin),
+  failing with "No solution found... pre-releases weren't enabled" and
+  blocking installation of the integration entirely. Added
+  `betterproto==2.0.0b7` as its own top-level entry in
+  `manifest.json`'s `requirements` - `uv` accepts an exact-version
+  prerelease pin when it's requested directly, not just transitively.
+
 ## [2026.8.1] - 2026-08-13
 
 ### Changed
